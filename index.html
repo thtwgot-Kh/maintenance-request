@@ -666,7 +666,7 @@ function renderNew(){
           <input class="input" data-fid="machineSearch" placeholder="พิมพ์ค้นหารหัสหรือชื่อเครื่องจักรในแผนก ${f.dept}..."
             value="${escapeHtml(f.machineSearch)}"
             oninput="updateFormField('machineSearch', this.value)"
-            onfocus="state.showMachineDropdown=true; render();">
+            onfocus="if(!state.showMachineDropdown){ state.showMachineDropdown=true; render(); }">
           ${dropdown}
         </div>`;
     }
