@@ -356,7 +356,7 @@ async function tryLineWebhook(role, message){
   const url = state.config.lineWebhooks && state.config.lineWebhooks[role];
   if(!url) return;
   try{
-    await fetch(url, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ role, message, at: nowIso() }) });
+    await fetch(url, { method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'}, body: JSON.stringify({ role, message, at: nowIso() }) });
   }catch(e){ console.warn('LINE relay webhook not reachable (check URL / CORS):', e); }
 }
 
