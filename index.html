@@ -663,7 +663,7 @@ function renderNew(){
         </div>` : '';
       machineSection = `
         <div class="search-wrap">
-          <input class="input" placeholder="พิมพ์ค้นหารหัสหรือชื่อเครื่องจักรในแผนก ${f.dept}..."
+          <input class="input" data-fid="machineSearch" placeholder="พิมพ์ค้นหารหัสหรือชื่อเครื่องจักรในแผนก ${f.dept}..."
             value="${escapeHtml(f.machineSearch)}"
             oninput="updateFormField('machineSearch', this.value)"
             onfocus="state.showMachineDropdown=true; render();">
@@ -698,7 +698,7 @@ function renderNew(){
 
     <div class="field">
       <label class="field-label">3. อาการ / สาเหตุที่ต้องการแจ้งซ่อม <span class="req-star">*</span></label>
-      <textarea class="input" placeholder="อธิบายอาการเสีย หรือสาเหตุที่พบ..." oninput="updateFormField('cause', this.value)">${escapeHtml(f.cause)}</textarea>
+      <textarea class="input" data-fid="cause" placeholder="อธิบายอาการเสีย หรือสาเหตุที่พบ..." oninput="updateFormField('cause', this.value)">${escapeHtml(f.cause)}</textarea>
     </div>
 
     <div class="field">
@@ -711,11 +711,11 @@ function renderNew(){
     <div class="grid-2">
       <div class="field">
         <label class="field-label">4. วันที่ต้องการใช้งาน <span class="req-star">*</span></label>
-        <input class="input" type="date" value="${f.neededDate}" oninput="updateFormField('neededDate', this.value)">
+        <input class="input" data-fid="neededDate" type="date" value="${f.neededDate}" oninput="updateFormField('neededDate', this.value)">
       </div>
       <div class="field">
         <label class="field-label">ชื่อผู้แจ้ง <span class="req-star">*</span></label>
-        <input class="input" type="text" placeholder="ชื่อ-นามสกุล" value="${escapeHtml(f.requestedBy)}" oninput="updateFormField('requestedBy', this.value)">
+        <input class="input" data-fid="requestedBy" type="text" placeholder="ชื่อ-นามสกุล" value="${escapeHtml(f.requestedBy)}" oninput="updateFormField('requestedBy', this.value)">
       </div>
     </div>
 
@@ -986,6 +986,11 @@ function render(){
     app.innerHTML = `<div style="padding:60px; text-align:center; color:var(--slate);">กำลังโหลดระบบ...</div>`;
     return;
   }
+  const active = document.activeElement;
+  const fid = active && app.contains(active) ? active.getAttribute('data-fid') : null;
+  const selStart = fid && 'selectionStart' in active ? active.selectionStart : null;
+  const selEnd = fid && 'selectionEnd' in active ? active.selectionEnd : null;
+
   let body = '';
   if(state.view==='new') body = renderNew();
   else if(state.view==='list') body = renderList();
@@ -993,6 +998,16 @@ function render(){
   else if(state.view==='notif') body = renderNotif();
   else if(state.view==='settings') body = renderSettings();
   app.innerHTML = renderHeader() + `<main>${body}</main>`;
+
+  if(fid){
+    const restored = app.querySelector(`[data-fid="${fid}"]`);
+    if(restored){
+      restored.focus();
+      if(selStart != null && restored.setSelectionRange){
+        try{ restored.setSelectionRange(selStart, selEnd); }catch(e){}
+      }
+    }
+  }
 }
 
 /* ============================= INIT ============================= */
