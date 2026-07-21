@@ -196,10 +196,27 @@
   table.mini td .del{background:none; border:none; color:var(--danger); cursor:pointer; font-size:12px;}
   .inline-form{display:flex; gap:8px; margin-top:10px; flex-wrap:wrap;}
   .inline-form input, .inline-form select{flex:1; min-width:100px;}
-  .chip-row{display:flex; gap:6px; flex-wrap:wrap; margin-top:8px;}
-  .chip{background:var(--paper); border:1px solid var(--line); border-radius:20px; padding:5px 12px; font-size:12.5px; display:flex; align-items:center; gap:6px;}
-  .chip button{background:none;border:none;color:var(--danger);cursor:pointer;font-size:12px;padding:0;}
   .note-box{background:var(--warn-bg); border:1px solid #e6cd9c; border-radius:8px; padding:12px 14px; font-size:12.5px; color:#7a5a13; margin-bottom:18px;}
+  .summary-stats{display:flex; border:1px solid var(--line); border-radius:8px; overflow:hidden;}
+  .summary-stats .stat{flex:1; padding:12px 10px; text-align:center; border-right:1px solid var(--line);}
+  .summary-stats .stat:last-child{border-right:none;}
+  .summary-stats .stat .num{font-family:'JetBrains Mono',monospace; font-size:20px; font-weight:700; color:var(--navy);}
+  .summary-stats .stat .lbl{font-size:11px; color:var(--slate); margin-top:2px;}
+  .summary-link{
+    display:flex; align-items:center; justify-content:space-between; gap:10px; margin-top:10px;
+    background:var(--paper); border:1px dashed var(--amber-dark); border-radius:8px; padding:11px 13px;
+  }
+  .summary-link .txt{font-size:12.5px; color:var(--ink);}
+  .summary-link .txt b{color:var(--navy);}
+  .summary-link a{font-size:12px; font-weight:700; color:var(--amber-dark); text-decoration:none; white-space:nowrap;}
+  .summary-link a:hover{text-decoration:underline;}
+  .info-toggle{margin-bottom:10px;}
+  .info-toggle summary{
+    cursor:pointer; font-size:12.5px; color:var(--amber-dark); font-weight:600; list-style:none;
+  }
+  .info-toggle summary::-webkit-details-marker{display:none;}
+  .info-toggle summary::before{content:'ℹ️ '; }
+  .info-toggle p{margin-top:8px;}
 
   .toast-wrap{position:fixed; bottom:20px; left:50%; transform:translateX(-50%); z-index:999; display:flex; flex-direction:column; gap:8px; align-items:center;}
   .toast{background:var(--navy); color:#fff; padding:11px 20px; border-radius:8px; font-size:13.5px; box-shadow:0 6px 20px rgba(0,0,0,.2); animation:toastin .18s ease-out;}
@@ -267,11 +284,12 @@ let state = {
   detailPhotos: [],
   filterStatus: 'ALL',
   filterDept: 'ALL',
-  ui: { rejectBoxFor:null, rejectReason:'', assignTech:'', newMachine:{code:'',name:'',dept:''}, newTechName:'', newWebhookRole:'fm', newWebhookUrl:'' },
+  ui: { rejectBoxFor:null, rejectReason:'', assignTech:'', newWebhookRole:'fm', newWebhookUrl:'' },
 };
 
 /* ============================= STORAGE HELPERS (Google Sheets via Apps Script) ============================= */
 const API_URL = 'https://script.google.com/macros/s/AKfycbxDWgbzb9_SHijHom8UqRZJF3NJBw149Nj973kuqaFuUnR0CM5_lD_fmLIeFBJ6mnVGPw/exec';
+const SHEET_URL = 'https://docs.google.com/spreadsheets/d/1er3WPCHJmV8_lioD-9gShr5mWDaajvXEYrEaaV-_p-k/edit';
 
 async function storeGet(key){
   try{
@@ -552,46 +570,6 @@ async function finishRepair(id){
 }
 
 /* ============================= SETTINGS ACTIONS ============================= */
-async function addDept(){
-  const code = (state.ui.newMachine.deptCodeInput||'').trim().toUpperCase();
-  if(!code) return;
-  if(state.config.departments.some(d=>d.code===code)){ toast('มีรหัสแผนกนี้อยู่แล้ว', true); return; }
-  state.config.departments.push({ code, name: code });
-  await storeSet('config', state.config);
-  toast('เพิ่มแผนกแล้ว'); render();
-}
-async function removeDept(code){
-  state.config.departments = state.config.departments.filter(d=>d.code!==code);
-  await storeSet('config', state.config);
-  render();
-}
-async function addMachine(){
-  const m = state.ui.newMachine;
-  if(!m.code || !m.name || !m.dept){ toast('กรอกรหัส ชื่อเครื่อง และแผนกให้ครบ', true); return; }
-  if(state.config.machines.some(x=>x.code.toLowerCase()===m.code.toLowerCase())){ toast('มีรหัสเครื่องนี้อยู่แล้ว', true); return; }
-  state.config.machines.push({ code:m.code.trim(), name:m.name.trim(), dept:m.dept });
-  await storeSet('config', state.config);
-  state.ui.newMachine = {code:'',name:'',dept:''};
-  toast('เพิ่มรหัสเครื่องจักรแล้ว'); render();
-}
-async function removeMachine(code){
-  state.config.machines = state.config.machines.filter(m=>m.code!==code);
-  await storeSet('config', state.config);
-  render();
-}
-async function addTech(){
-  const name = state.ui.newTechName.trim();
-  if(!name) return;
-  state.config.technicians.push(name);
-  await storeSet('config', state.config);
-  state.ui.newTechName='';
-  render();
-}
-async function removeTech(name){
-  state.config.technicians = state.config.technicians.filter(t=>t!==name);
-  await storeSet('config', state.config);
-  render();
-}
 async function saveWebhook(){
   const role = state.ui.newWebhookRole;
   state.config.lineWebhooks[role] = state.ui.newWebhookUrl.trim();
@@ -600,9 +578,8 @@ async function saveWebhook(){
   render();
 }
 async function resetAllData(){
-  state.config = { departments: DEPT_DEFAULT, machines: MACHINES_DEFAULT, technicians: TECH_DEFAULT, lineWebhooks:{} };
   state.counters = {}; state.orders = []; state.notifications = [];
-  await storeSet('config', state.config); await storeSet('counters', state.counters);
+  await storeSet('counters', state.counters);
   await storeSet('orders', state.orders); await storeSet('notifications', state.notifications);
   toast('ล้างข้อมูลระบบเรียบร้อย');
   render();
@@ -902,67 +879,34 @@ function renderNotif(){
 
 /* ============================= RENDER: SETTINGS ============================= */
 function renderSettings(){
-  const deptRows = state.config.departments.map(d => `
-    <tr><td class="mono">${d.code}</td><td>${escapeHtml(d.name)}</td>
-      <td><button class="del" onclick="removeDept('${d.code}')">ลบ</button></td></tr>`).join('');
-
-  const machineRows = state.config.machines.map(m => `
-    <tr><td class="mono">${escapeHtml(m.code)}</td><td>${escapeHtml(m.name)}</td><td>${m.dept}</td>
-      <td><button class="del" onclick="removeMachine('${m.code}')">ลบ</button></td></tr>`).join('');
-
-  const deptOptsForMachine = state.config.departments.map(d=>`<option value="${d.code}">${d.code}</option>`).join('');
-
-  const techChips = state.config.technicians.map(t => `
-    <div class="chip">${escapeHtml(t)}<button onclick="removeTech('${escapeHtml(t).replace(/'/g,"\\'")}')">✕</button></div>`).join('');
-
   const webhookRoleOpts = ['fm','gm','maint','requester'].map(r=>`<option value="${r}">${ROLES[r].label}</option>`).join('');
   const webhookRows = ['fm','gm','maint','requester'].map(r => `
     <tr><td>${ROLES[r].label}</td><td class="mono" style="word-break:break-all;">${state.config.lineWebhooks[r] ? escapeHtml(state.config.lineWebhooks[r]) : '<span style="color:var(--slate-light)">ยังไม่ได้ตั้งค่า</span>'}</td></tr>`).join('');
 
   return `
   <h2 class="view-title">ตั้งค่าข้อมูลหลัก</h2>
-  <p class="view-sub">จัดการแผนก รหัสเครื่องจักร รายชื่อช่าง และการเชื่อมต่อแจ้งเตือน LINE</p>
-
-  <div class="note-box">
-    ⚠️ <b>เกี่ยวกับการแจ้งเตือน LINE:</b> LINE Notify ปิดให้บริการแล้วตั้งแต่ 31 มี.ค. 2568 การส่งข้อความ LINE จริงในปัจจุบันต้องใช้ LINE Official Account + Messaging API ซึ่งต้องมีระบบหลังบ้าน (server) เก็บ token อย่างปลอดภัย — ไม่สามารถฝังไว้ในหน้าเว็บนี้ได้โดยตรง
-    ระบบนี้จึงมี "การแจ้งเตือนในระบบ" ให้ใช้งานได้ทันที และมีช่อง Webhook URL ด้านล่างสำหรับต่อยอด: หากท่านตั้งค่า relay ผ่าน Google Apps Script / n8n / Make.com ที่รับ POST แล้วส่งต่อเข้า LINE Messaging API เอง ระบบจะยิงข้อมูลไปที่ URL นั้นให้อัตโนมัติทุกครั้งที่มีการเปลี่ยนสถานะ
-  </div>
+  <p class="view-sub">ข้อมูลหลักจัดการที่ Google Sheet ส่วนนี้ตั้งค่าเฉพาะของแอป</p>
 
   <div class="settings-section card">
-    <h3>แผนก</h3>
-    <p class="desc">แผนกที่แสดงในหน้าแจ้งซ่อมใหม่</p>
-    <table class="mini"><tr><th>รหัส</th><th>ชื่อ</th><th></th></tr>${deptRows}</table>
-    <div class="inline-form">
-      <input class="input" data-fid="newDeptCode" placeholder="รหัสแผนกใหม่ เช่น MT" oninput="state.ui.newMachine.deptCodeInput=this.value">
-      <button class="btn btn-outline btn-sm" onclick="addDept()">+ เพิ่มแผนก</button>
+    <h3>แผนก · เครื่องจักร · ช่าง</h3>
+    <p class="desc">แก้ไข เพิ่ม หรือลบข้อมูลได้โดยตรงที่ Google Sheet — เปลี่ยนแล้วเข้าแอปอัตโนมัติภายในไม่กี่วินาที</p>
+    <div class="summary-stats">
+      <div class="stat"><div class="num">${state.config.departments.length}</div><div class="lbl">แผนก</div></div>
+      <div class="stat"><div class="num">${state.config.machines.length}</div><div class="lbl">เครื่องจักร</div></div>
+      <div class="stat"><div class="num">${state.config.technicians.length}</div><div class="lbl">ช่าง</div></div>
+    </div>
+    <div class="summary-link">
+      <div class="txt">เปิด <b>ระบบแจ้งซ่อมเครื่องจักร - Database</b> เพื่อแก้ไข</div>
+      <a href="${SHEET_URL}" target="_blank" rel="noopener">เปิด Sheet →</a>
     </div>
   </div>
 
   <div class="settings-section card">
-    <h3>รหัสเครื่องจักร</h3>
-    <p class="desc">ระบบจะกรองให้เลือกเฉพาะเครื่องจักรของแผนกที่เลือกเท่านั้น แก้ไข/เพิ่มรายการจริงของโรงงานได้ที่นี่</p>
-    <table class="mini"><tr><th>รหัส</th><th>ชื่อเครื่องจักร</th><th>แผนก</th><th></th></tr>${machineRows}</table>
-    <div class="inline-form">
-      <input class="input" data-fid="newMachineCode" placeholder="รหัสเครื่อง" oninput="state.ui.newMachine.code=this.value" value="${escapeHtml(state.ui.newMachine.code||'')}">
-      <input class="input" data-fid="newMachineName" placeholder="ชื่อเครื่องจักร" oninput="state.ui.newMachine.name=this.value" value="${escapeHtml(state.ui.newMachine.name||'')}">
-      <select class="input" onchange="state.ui.newMachine.dept=this.value"><option value="">แผนก</option>${deptOptsForMachine}</select>
-      <button class="btn btn-outline btn-sm" onclick="addMachine()">+ เพิ่มเครื่องจักร</button>
-    </div>
-  </div>
-
-  <div class="settings-section card">
-    <h3>รายชื่อช่างซ่อมบำรุง</h3>
-    <p class="desc">ใช้สำหรับให้ผู้จัดการแผนกซ่อมบำรุงเลือกมอบหมายงาน</p>
-    <div class="chip-row">${techChips}</div>
-    <div class="inline-form">
-      <input class="input" data-fid="newTechName" placeholder="ชื่อช่างใหม่" value="${escapeHtml(state.ui.newTechName)}" oninput="state.ui.newTechName=this.value">
-      <button class="btn btn-outline btn-sm" onclick="addTech()">+ เพิ่มช่าง</button>
-    </div>
-  </div>
-
-  <div class="settings-section card">
-    <h3>การเชื่อมต่อแจ้งเตือน LINE (ทางเลือกเสริม)</h3>
-    <p class="desc">ใส่ Webhook URL ของ relay ที่ท่านตั้งค่าไว้ (ดูคำอธิบายด้านบน) — เว้นว่างได้หากยังไม่พร้อมใช้งาน</p>
+    <h3>การเชื่อมต่อแจ้งเตือน LINE</h3>
+    <details class="info-toggle">
+      <summary>LINE Notify ปิดให้บริการแล้ว — อ่านเพิ่มเติม</summary>
+      <p class="desc" style="margin-top:-2px;">ปิดให้บริการตั้งแต่ 31 มี.ค. 2568 การส่งข้อความ LINE จริงในปัจจุบันต้องใช้ LINE Official Account + Messaging API ซึ่งต้องมีระบบหลังบ้าน (server) เก็บ token อย่างปลอดภัย — ไม่สามารถฝังไว้ในหน้าเว็บนี้ได้โดยตรง ระบบนี้จึงมี "การแจ้งเตือนในระบบ" ให้ใช้งานได้ทันที และมีช่อง Webhook URL ด้านล่างสำหรับต่อยอด: หากท่านตั้งค่า relay ผ่าน Google Apps Script / n8n / Make.com ที่รับ POST แล้วส่งต่อเข้า LINE Messaging API เอง ระบบจะยิงข้อมูลไปที่ URL นั้นให้อัตโนมัติทุกครั้งที่มีการเปลี่ยนสถานะ</p>
+    </details>
     <table class="mini"><tr><th>บทบาท</th><th>Webhook URL</th></tr>${webhookRows}</table>
     <div class="inline-form">
       <select class="input" onchange="state.ui.newWebhookRole=this.value">${webhookRoleOpts}</select>
@@ -973,7 +917,7 @@ function renderSettings(){
 
   <div class="settings-section card">
     <h3>รีเซ็ตข้อมูลระบบ</h3>
-    <p class="desc">ล้างใบแจ้งซ่อม เลขที่เอกสาร และการแจ้งเตือนทั้งหมด กลับสู่ค่าเริ่มต้น (ใช้สำหรับทดสอบระบบ)</p>
+    <p class="desc">ล้างใบแจ้งซ่อม เลขที่เอกสาร และการแจ้งเตือนทั้งหมด (ไม่กระทบแผนก/เครื่องจักร/ช่างใน Sheet)</p>
     <button class="btn btn-danger-outline btn-sm" onclick="resetAllData()">ล้างข้อมูลทั้งหมด</button>
   </div>
   `;
