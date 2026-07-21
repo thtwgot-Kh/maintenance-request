@@ -800,7 +800,7 @@ function renderDetail(){
       ${rejectingThis ? `
       <div class="reject-box">
         <label class="field-label">เหตุผลที่ไม่อนุมัติ</label>
-        <textarea class="input" oninput="state.ui.rejectReason=this.value" placeholder="ระบุเหตุผล..."></textarea>
+        <textarea class="input" data-fid="rejectReason" oninput="state.ui.rejectReason=this.value" placeholder="ระบุเหตุผล..."></textarea>
         <div class="order-actions">
           <button class="btn btn-danger-outline btn-sm" onclick="rejectFm('${o.id}')">ยืนยันไม่อนุมัติ</button>
           <button class="btn btn-outline btn-sm" onclick="state.ui.rejectBoxFor=null; render();">ยกเลิก</button>
@@ -818,7 +818,7 @@ function renderDetail(){
       ${rejectingThis ? `
       <div class="reject-box">
         <label class="field-label">เหตุผลที่ไม่อนุมัติ</label>
-        <textarea class="input" oninput="state.ui.rejectReason=this.value" placeholder="ระบุเหตุผล..."></textarea>
+        <textarea class="input" data-fid="rejectReason" oninput="state.ui.rejectReason=this.value" placeholder="ระบุเหตุผล..."></textarea>
         <div class="order-actions">
           <button class="btn btn-danger-outline btn-sm" onclick="rejectGm('${o.id}')">ยืนยันไม่อนุมัติ</button>
           <button class="btn btn-outline btn-sm" onclick="state.ui.rejectBoxFor=null; render();">ยกเลิก</button>
@@ -933,7 +933,7 @@ function renderSettings(){
     <p class="desc">แผนกที่แสดงในหน้าแจ้งซ่อมใหม่</p>
     <table class="mini"><tr><th>รหัส</th><th>ชื่อ</th><th></th></tr>${deptRows}</table>
     <div class="inline-form">
-      <input class="input" placeholder="รหัสแผนกใหม่ เช่น MT" oninput="state.ui.newMachine.deptCodeInput=this.value">
+      <input class="input" data-fid="newDeptCode" placeholder="รหัสแผนกใหม่ เช่น MT" oninput="state.ui.newMachine.deptCodeInput=this.value">
       <button class="btn btn-outline btn-sm" onclick="addDept()">+ เพิ่มแผนก</button>
     </div>
   </div>
@@ -943,8 +943,8 @@ function renderSettings(){
     <p class="desc">ระบบจะกรองให้เลือกเฉพาะเครื่องจักรของแผนกที่เลือกเท่านั้น แก้ไข/เพิ่มรายการจริงของโรงงานได้ที่นี่</p>
     <table class="mini"><tr><th>รหัส</th><th>ชื่อเครื่องจักร</th><th>แผนก</th><th></th></tr>${machineRows}</table>
     <div class="inline-form">
-      <input class="input" placeholder="รหัสเครื่อง" oninput="state.ui.newMachine.code=this.value" value="${escapeHtml(state.ui.newMachine.code||'')}">
-      <input class="input" placeholder="ชื่อเครื่องจักร" oninput="state.ui.newMachine.name=this.value" value="${escapeHtml(state.ui.newMachine.name||'')}">
+      <input class="input" data-fid="newMachineCode" placeholder="รหัสเครื่อง" oninput="state.ui.newMachine.code=this.value" value="${escapeHtml(state.ui.newMachine.code||'')}">
+      <input class="input" data-fid="newMachineName" placeholder="ชื่อเครื่องจักร" oninput="state.ui.newMachine.name=this.value" value="${escapeHtml(state.ui.newMachine.name||'')}">
       <select class="input" onchange="state.ui.newMachine.dept=this.value"><option value="">แผนก</option>${deptOptsForMachine}</select>
       <button class="btn btn-outline btn-sm" onclick="addMachine()">+ เพิ่มเครื่องจักร</button>
     </div>
@@ -955,7 +955,7 @@ function renderSettings(){
     <p class="desc">ใช้สำหรับให้ผู้จัดการแผนกซ่อมบำรุงเลือกมอบหมายงาน</p>
     <div class="chip-row">${techChips}</div>
     <div class="inline-form">
-      <input class="input" placeholder="ชื่อช่างใหม่" value="${escapeHtml(state.ui.newTechName)}" oninput="state.ui.newTechName=this.value">
+      <input class="input" data-fid="newTechName" placeholder="ชื่อช่างใหม่" value="${escapeHtml(state.ui.newTechName)}" oninput="state.ui.newTechName=this.value">
       <button class="btn btn-outline btn-sm" onclick="addTech()">+ เพิ่มช่าง</button>
     </div>
   </div>
@@ -966,7 +966,7 @@ function renderSettings(){
     <table class="mini"><tr><th>บทบาท</th><th>Webhook URL</th></tr>${webhookRows}</table>
     <div class="inline-form">
       <select class="input" onchange="state.ui.newWebhookRole=this.value">${webhookRoleOpts}</select>
-      <input class="input" placeholder="https://..." oninput="state.ui.newWebhookUrl=this.value">
+      <input class="input" data-fid="newWebhookUrl" placeholder="https://..." oninput="state.ui.newWebhookUrl=this.value">
       <button class="btn btn-outline btn-sm" onclick="saveWebhook()">บันทึก</button>
     </div>
   </div>
@@ -1010,10 +1010,25 @@ function render(){
   }
 }
 
+/* ============================= LIVE POLLING (near real-time sync) ============================= */
+async function pollForUpdates(){
+  try{
+    const [cfg, orders, notifs] = await Promise.all([
+      storeGet('config'), storeGet('orders'), storeGet('notifications')
+    ]);
+    let changed = false;
+    if(cfg && JSON.stringify(cfg) !== JSON.stringify(state.config)){ state.config = cfg; changed = true; }
+    if(orders && JSON.stringify(orders) !== JSON.stringify(state.orders)){ state.orders = orders; changed = true; }
+    if(notifs && JSON.stringify(notifs) !== JSON.stringify(state.notifications)){ state.notifications = notifs; changed = true; }
+    if(changed) render();
+  }catch(e){ /* silent - next poll retries */ }
+}
+
 /* ============================= INIT ============================= */
 (async function init(){
   await loadAll();
   render();
+  setInterval(pollForUpdates, 7000);
 })();
 </script>
 </body>
