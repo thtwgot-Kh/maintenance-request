@@ -270,14 +270,25 @@ let state = {
   ui: { rejectBoxFor:null, rejectReason:'', assignTech:'', newMachine:{code:'',name:'',dept:''}, newTechName:'', newWebhookRole:'fm', newWebhookUrl:'' },
 };
 
-/* ============================= STORAGE HELPERS ============================= */
+/* ============================= STORAGE HELPERS (Google Sheets via Apps Script) ============================= */
+const API_URL = 'https://script.google.com/macros/s/AKfycby379cC-SznTd0UTvGViyCke3lQ5SBijmr46tKPAhiVKLN186h9mTyFYBVyBdz8OP9LCg/exec';
+
 async function storeGet(key){
-  try{ const r = await window.storage.get(key, true); return r ? JSON.parse(r.value) : null; }
-  catch(e){ return null; }
+  try{
+    const res = await fetch(API_URL + '?key=' + encodeURIComponent(key));
+    const data = await res.json();
+    return data.value ? JSON.parse(data.value) : null;
+  }catch(e){ return null; }
 }
 async function storeSet(key, val){
-  try{ await window.storage.set(key, JSON.stringify(val), true); return true; }
-  catch(e){ console.error('storage set failed', key, e); return false; }
+  try{
+    await fetch(API_URL, {
+      method:'POST',
+      headers:{'Content-Type':'text/plain;charset=utf-8'},
+      body: JSON.stringify({ key, value: JSON.stringify(val) })
+    });
+    return true;
+  }catch(e){ console.error('storage set failed', key, e); return false; }
 }
 
 async function loadAll(){
