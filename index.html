@@ -1,0 +1,994 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ระบบแจ้งซ่อมเครื่องจักร</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --navy:#1F2C3B;
+    --navy-2:#28394d;
+    --amber:#E8A33D;
+    --amber-dark:#c17f1e;
+    --paper:#F5F2EA;
+    --card:#FFFFFF;
+    --ink:#232323;
+    --slate:#6b7785;
+    --slate-light:#98a2ac;
+    --success:#2F8F6B;
+    --success-bg:#e6f3ee;
+    --danger:#B5433A;
+    --danger-bg:#fbeae8;
+    --line:#dfd8c8;
+    --warn:#c17f1e;
+    --warn-bg:#fbf0dd;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; background:var(--paper); color:var(--ink);
+    font-family:'Sarabun',sans-serif; font-size:15px; line-height:1.5;
+    min-height:100vh;
+  }
+  .mono{font-family:'JetBrains Mono',monospace;}
+  header.topbar{
+    background:var(--navy); color:#fff; padding:14px 20px;
+    display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;
+    border-bottom:4px solid var(--amber);
+  }
+  .brand{display:flex; align-items:center; gap:10px;}
+  .brand .logo{
+    width:34px; height:34px; border-radius:7px; background:var(--amber);
+    display:flex; align-items:center; justify-content:center; font-weight:700; color:var(--navy); font-size:16px;
+    transform:rotate(-4deg);
+  }
+  .brand h1{font-size:16px; margin:0; font-weight:600;}
+  .brand .sub{font-size:11.5px; color:#b9c3cd; margin-top:1px;}
+  .role-select{display:flex; align-items:center; gap:8px; font-size:13px; color:#d9dfe5;}
+  .role-select select{
+    background:var(--navy-2); color:#fff; border:1px solid #3c5064; border-radius:6px;
+    padding:7px 10px; font-family:'Sarabun',sans-serif; font-size:13.5px; cursor:pointer;
+  }
+  nav.tabs{
+    display:flex; gap:2px; background:var(--navy-2); padding:0 14px; overflow-x:auto;
+  }
+  nav.tabs button{
+    background:none; border:none; color:#c3ccd4; padding:12px 16px; font-family:'Sarabun',sans-serif;
+    font-size:14px; cursor:pointer; border-bottom:3px solid transparent; white-space:nowrap; position:relative;
+  }
+  nav.tabs button.active{color:#fff; border-bottom-color:var(--amber); font-weight:600;}
+  nav.tabs button .badge{
+    background:var(--amber); color:var(--navy); border-radius:20px; font-size:10.5px; font-weight:700;
+    padding:1px 6px; margin-left:6px;
+  }
+  main{max-width:920px; margin:0 auto; padding:22px 16px 80px;}
+  h2.view-title{font-size:19px; margin:0 0 4px; font-weight:700; color:var(--navy);}
+  p.view-sub{color:var(--slate); font-size:13.5px; margin:0 0 20px;}
+  .card{background:var(--card); border-radius:10px; padding:20px; box-shadow:0 1px 3px rgba(31,44,59,0.08); border:1px solid #ece6d8;}
+  label.field-label{display:block; font-size:13px; font-weight:600; color:var(--navy); margin-bottom:6px;}
+  .req-star{color:var(--danger);}
+  select.input, input.input, textarea.input{
+    width:100%; padding:10px 12px; border-radius:7px; border:1.5px solid var(--line); background:#fff;
+    font-family:'Sarabun',sans-serif; font-size:14px; color:var(--ink);
+  }
+  select.input:focus, input.input:focus, textarea.input:focus{outline:none; border-color:var(--amber-dark);}
+  textarea.input{resize:vertical; min-height:80px;}
+  .field{margin-bottom:18px;}
+  .dept-grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(110px,1fr)); gap:10px;}
+  .dept-btn{
+    border:2px solid var(--line); background:#fff; border-radius:9px; padding:14px 8px; cursor:pointer;
+    font-family:'JetBrains Mono',monospace; font-weight:700; font-size:17px; color:var(--navy);
+    text-align:center; transition:all .12s;
+  }
+  .dept-btn:hover{border-color:var(--amber-dark);}
+  .dept-btn.selected{background:var(--navy); border-color:var(--navy); color:#fff;}
+  .dept-btn .full-name{display:block; font-family:'Sarabun',sans-serif; font-weight:400; font-size:11px; margin-top:3px; opacity:.85;}
+  .docnum-box{
+    display:flex; align-items:center; gap:12px; background:var(--paper); border:1px dashed var(--amber-dark);
+    border-radius:8px; padding:12px 16px; margin-bottom:18px;
+  }
+  .doc-chip{
+    font-family:'JetBrains Mono',monospace; font-weight:700; font-size:18px; background:#fff;
+    border:2px dashed var(--amber-dark); padding:5px 12px; border-radius:4px; transform:rotate(-2deg);
+    display:inline-block; color:var(--navy); box-shadow:1px 1px 0 rgba(0,0,0,.05);
+  }
+  .docnum-box .hint{font-size:12.5px; color:var(--slate);}
+  .search-wrap{position:relative;}
+  .search-results{
+    position:absolute; z-index:20; top:calc(100% + 4px); left:0; right:0; background:#fff;
+    border:1.5px solid var(--line); border-radius:8px; max-height:220px; overflow-y:auto;
+    box-shadow:0 6px 18px rgba(0,0,0,.12);
+  }
+  .search-item{padding:10px 12px; cursor:pointer; border-bottom:1px solid #f0ece1; font-size:13.5px;}
+  .search-item:last-child{border-bottom:none;}
+  .search-item:hover{background:var(--paper);}
+  .search-item b.code{font-family:'JetBrains Mono',monospace; color:var(--navy);}
+  .selected-machine{
+    margin-top:8px; background:var(--success-bg); border:1px solid #bfe0d1; border-radius:7px;
+    padding:9px 12px; font-size:13.5px; display:flex; justify-content:space-between; align-items:center;
+  }
+  .selected-machine button{background:none;border:none;color:var(--danger);cursor:pointer;font-size:12.5px;font-family:'Sarabun',sans-serif;}
+  .photo-drop{
+    border:2px dashed var(--line); border-radius:9px; padding:18px; text-align:center; cursor:pointer; color:var(--slate); font-size:13.5px;
+  }
+  .photo-drop:hover{border-color:var(--amber-dark); color:var(--amber-dark);}
+  .photo-thumbs{display:flex; gap:8px; flex-wrap:wrap; margin-top:10px;}
+  .photo-thumb{position:relative; width:74px; height:74px; border-radius:7px; overflow:hidden; border:1px solid var(--line);}
+  .photo-thumb img{width:100%; height:100%; object-fit:cover;}
+  .photo-thumb .rm{
+    position:absolute; top:2px; right:2px; background:rgba(0,0,0,.6); color:#fff; border:none; border-radius:50%;
+    width:18px; height:18px; font-size:11px; cursor:pointer; line-height:18px; padding:0;
+  }
+  .btn{
+    border:none; border-radius:8px; padding:11px 20px; font-family:'Sarabun',sans-serif; font-weight:600; font-size:14px;
+    cursor:pointer; display:inline-flex; align-items:center; gap:6px;
+  }
+  .btn-primary{background:var(--amber); color:var(--navy);}
+  .btn-primary:hover{background:var(--amber-dark); color:#fff;}
+  .btn-primary:disabled{background:#e4dcc8; color:#a99f86; cursor:not-allowed;}
+  .btn-outline{background:#fff; border:1.5px solid var(--line); color:var(--navy);}
+  .btn-outline:hover{border-color:var(--navy);}
+  .btn-success{background:var(--success); color:#fff;}
+  .btn-danger-outline{background:#fff; border:1.5px solid var(--danger); color:var(--danger);}
+  .btn-danger-outline:hover{background:var(--danger-bg);}
+  .btn-sm{padding:7px 13px; font-size:12.5px; border-radius:6px;}
+  .btn-block{width:100%; justify-content:center;}
+
+  /* order ticket card */
+  .order-card{
+    background:var(--card); border-radius:9px; padding:16px 16px 16px 20px; margin-bottom:12px;
+    border:1px solid #ece6d8; position:relative; box-shadow:0 1px 2px rgba(31,44,59,.06);
+    border-left-width:6px; border-left-style:solid;
+  }
+  .order-card::before, .order-card::after{
+    content:''; position:absolute; left:-7px; width:14px; height:14px; border-radius:50%;
+    background:var(--paper); border:1px solid #ece6d8;
+  }
+  .order-card::before{top:-7px;}
+  .order-card::after{bottom:-7px;}
+  .order-top{display:flex; justify-content:space-between; align-items:flex-start; gap:10px; flex-wrap:wrap;}
+  .order-meta{font-size:12px; color:var(--slate); margin-top:4px;}
+  .status-pill{
+    font-size:11.5px; font-weight:700; padding:4px 10px; border-radius:20px; white-space:nowrap;
+  }
+  .order-body{margin-top:10px; font-size:13.5px;}
+  .order-body .cause{color:var(--ink); margin-top:4px;}
+  .order-actions{margin-top:12px; display:flex; gap:8px; flex-wrap:wrap;}
+  .filters{display:flex; gap:8px; margin-bottom:16px; flex-wrap:wrap;}
+  .filters select{font-size:13px; padding:8px 10px;}
+  .empty-state{text-align:center; padding:50px 20px; color:var(--slate);}
+  .empty-state .big{font-size:34px; margin-bottom:8px;}
+
+  /* detail view */
+  .back-link{background:none;border:none;color:var(--navy); cursor:pointer; font-size:13.5px; font-weight:600; margin-bottom:14px; display:inline-flex; align-items:center; gap:5px; padding:0;}
+  .detail-head{display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:10px; margin-bottom:16px;}
+  .grid-2{display:grid; grid-template-columns:1fr 1fr; gap:14px;}
+  @media(max-width:600px){.grid-2{grid-template-columns:1fr;}}
+  .kv{margin-bottom:10px;}
+  .kv .k{font-size:11.5px; color:var(--slate); text-transform:uppercase; letter-spacing:.4px;}
+  .kv .v{font-size:14px; margin-top:2px;}
+  .timeline{margin-top:6px; border-left:2px solid var(--line); padding-left:16px;}
+  .timeline-item{position:relative; padding-bottom:16px; font-size:13px;}
+  .timeline-item::before{content:''; position:absolute; left:-21px; top:3px; width:9px; height:9px; border-radius:50%; background:var(--amber-dark);}
+  .timeline-item .t-time{color:var(--slate); font-size:11.5px;}
+  .gallery{display:flex; gap:8px; flex-wrap:wrap; margin-top:6px;}
+  .gallery img{width:100px; height:100px; object-fit:cover; border-radius:7px; border:1px solid var(--line); cursor:pointer;}
+  .action-box{background:var(--paper); border:1px solid var(--line); border-radius:9px; padding:16px; margin-top:16px;}
+  .action-box h4{margin:0 0 10px; font-size:14px; color:var(--navy);}
+  .reject-box{margin-top:10px; background:#fff; border:1px solid var(--danger); border-radius:7px; padding:12px;}
+
+  /* notifications */
+  .notif-item{display:flex; gap:12px; padding:13px 14px; border-radius:8px; margin-bottom:8px; background:#fff; border:1px solid #ece6d8;}
+  .notif-item.unread{background:#fffaf0; border-color:var(--amber);}
+  .notif-icon{width:34px; height:34px; border-radius:50%; background:var(--navy); color:#fff; display:flex; align-items:center; justify-content:center; font-size:15px; flex-shrink:0;}
+  .notif-text{font-size:13.5px;}
+  .notif-time{font-size:11px; color:var(--slate); margin-top:2px;}
+
+  /* settings */
+  .settings-section{margin-bottom:26px;}
+  .settings-section h3{font-size:15px; color:var(--navy); margin:0 0 4px;}
+  .settings-section .desc{font-size:12.5px; color:var(--slate); margin:0 0 12px;}
+  table.mini{width:100%; border-collapse:collapse; font-size:13px;}
+  table.mini th{text-align:left; font-size:11.5px; color:var(--slate); text-transform:uppercase; padding:6px 8px; border-bottom:1.5px solid var(--line);}
+  table.mini td{padding:8px; border-bottom:1px solid #f0ece1; vertical-align:middle;}
+  table.mini td .del{background:none; border:none; color:var(--danger); cursor:pointer; font-size:12px;}
+  .inline-form{display:flex; gap:8px; margin-top:10px; flex-wrap:wrap;}
+  .inline-form input, .inline-form select{flex:1; min-width:100px;}
+  .chip-row{display:flex; gap:6px; flex-wrap:wrap; margin-top:8px;}
+  .chip{background:var(--paper); border:1px solid var(--line); border-radius:20px; padding:5px 12px; font-size:12.5px; display:flex; align-items:center; gap:6px;}
+  .chip button{background:none;border:none;color:var(--danger);cursor:pointer;font-size:12px;padding:0;}
+  .note-box{background:var(--warn-bg); border:1px solid #e6cd9c; border-radius:8px; padding:12px 14px; font-size:12.5px; color:#7a5a13; margin-bottom:18px;}
+
+  .toast-wrap{position:fixed; bottom:20px; left:50%; transform:translateX(-50%); z-index:999; display:flex; flex-direction:column; gap:8px; align-items:center;}
+  .toast{background:var(--navy); color:#fff; padding:11px 20px; border-radius:8px; font-size:13.5px; box-shadow:0 6px 20px rgba(0,0,0,.2); animation:toastin .18s ease-out;}
+  .toast.err{background:var(--danger);}
+  @keyframes toastin{from{opacity:0; transform:translateY(8px);} to{opacity:1; transform:translateY(0);}}
+
+  ::-webkit-scrollbar{width:8px; height:8px;}
+  ::-webkit-scrollbar-thumb{background:#cfc7b2; border-radius:8px;}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div class="toast-wrap" id="toastWrap"></div>
+
+<script>
+/* ============================= CONFIG / CONSTANTS ============================= */
+const ROLES = {
+  requester: { label:'ผู้แจ้งซ่อม', icon:'📝' },
+  fm:        { label:'ผู้จัดการโรงงาน (อนุมัติ 1)', icon:'🏭' },
+  gm:        { label:'ผู้จัดการทั่วไป (อนุมัติ 2)', icon:'🗂️' },
+  maint:     { label:'ผู้จัดการแผนกซ่อมบำรุง', icon:'🔧' },
+  admin:     { label:'ผู้ดูแลระบบ (ตั้งค่า)', icon:'⚙️' },
+};
+const STATUS_META = {
+  PENDING_FM:    { label:'รออนุมัติ (ผจก.โรงงาน)', color:'#c17f1e', bg:'#fbf0dd' },
+  PENDING_GM:    { label:'รออนุมัติ (ผจก.ทั่วไป)',  color:'#c17f1e', bg:'#fbf0dd' },
+  PENDING_ASSIGN:{ label:'รอมอบหมายช่าง',           color:'#2a6f97', bg:'#e4f0f7' },
+  ASSIGNED:      { label:'รอดำเนินการ',             color:'#6b7785', bg:'#eef0f2' },
+  IN_PROGRESS:   { label:'กำลังซ่อม',               color:'#1F2C3B', bg:'#e6ecf1' },
+  DONE:          { label:'ซ่อมเรียบร้อย',            color:'#2F8F6B', bg:'#e6f3ee' },
+  REJECTED:      { label:'ไม่อนุมัติ',               color:'#B5433A', bg:'#fbeae8' },
+};
+const DEPT_DEFAULT = [
+  { code:'RB', name:'Rubber (RB)' },
+  { code:'GR', name:'Grinding (GR)' },
+  { code:'QA', name:'Quality Assurance (QA)' },
+  { code:'BG', name:'Bagging (BG)' },
+];
+const MACHINES_DEFAULT = [
+  { code:'RB-01', name:'เครื่องรีดยาง 1', dept:'RB' },
+  { code:'RB-02', name:'เครื่องรีดยาง 2', dept:'RB' },
+  { code:'RB-03', name:'เครื่องอบยาง', dept:'RB' },
+  { code:'GR-01', name:'เครื่องบดวัตถุดิบ 1', dept:'GR' },
+  { code:'GR-02', name:'เครื่องบดวัตถุดิบ 2', dept:'GR' },
+  { code:'QA-01', name:'เครื่องทดสอบแรงดึง', dept:'QA' },
+  { code:'QA-02', name:'เครื่องชั่งน้ำหนักดิจิทัล', dept:'QA' },
+  { code:'BG-01', name:'เครื่องบรรจุถุง 1', dept:'BG' },
+  { code:'BG-02', name:'เครื่องบรรจุถุง 2', dept:'BG' },
+];
+const TECH_DEFAULT = ['ช่างสมชาย (ไฟฟ้า)', 'ช่างวิชัย (เครื่องกล)', 'ช่างประเสริฐ (ทั่วไป)'];
+
+const emptyForm = () => ({ dept:'', machineCode:'', machineSearch:'', machineName:'', cause:'', neededDate:'', requestedBy:'', photos:[] });
+
+let state = {
+  role: 'requester',
+  view: 'new',
+  config: { departments: DEPT_DEFAULT, machines: MACHINES_DEFAULT, technicians: TECH_DEFAULT, lineWebhooks:{} },
+  counters: {},
+  orders: [],
+  notifications: [],
+  loaded: false,
+  form: emptyForm(),
+  showMachineDropdown: false,
+  selectedOrderId: null,
+  detailPhotos: [],
+  filterStatus: 'ALL',
+  filterDept: 'ALL',
+  ui: { rejectBoxFor:null, rejectReason:'', assignTech:'', newMachine:{code:'',name:'',dept:''}, newTechName:'', newWebhookRole:'fm', newWebhookUrl:'' },
+};
+
+/* ============================= STORAGE HELPERS ============================= */
+async function storeGet(key){
+  try{ const r = await window.storage.get(key, true); return r ? JSON.parse(r.value) : null; }
+  catch(e){ return null; }
+}
+async function storeSet(key, val){
+  try{ await window.storage.set(key, JSON.stringify(val), true); return true; }
+  catch(e){ console.error('storage set failed', key, e); return false; }
+}
+
+async function loadAll(){
+  const [cfg, counters, orders, notifs] = await Promise.all([
+    storeGet('config'), storeGet('counters'), storeGet('orders'), storeGet('notifications')
+  ]);
+  state.config = cfg || state.config;
+  if(!state.config.lineWebhooks) state.config.lineWebhooks = {};
+  state.counters = counters || {};
+  state.orders = orders || [];
+  state.notifications = notifs || [];
+  state.loaded = true;
+  if(!cfg) await storeSet('config', state.config);
+}
+
+/* ============================= UTIL ============================= */
+function uid(){ return (crypto.randomUUID ? crypto.randomUUID() : 'id-'+Date.now()+'-'+Math.random().toString(16).slice(2)); }
+function nowIso(){ return new Date().toISOString(); }
+function fmtDateTime(iso){
+  const d = new Date(iso);
+  return d.toLocaleString('th-TH', { day:'2-digit', month:'2-digit', year:'2-digit', hour:'2-digit', minute:'2-digit' });
+}
+function fmtDate(dstr){
+  if(!dstr) return '-';
+  const d = new Date(dstr+'T00:00:00');
+  return d.toLocaleDateString('th-TH', { day:'2-digit', month:'2-digit', year:'2-digit' });
+}
+function yyNow(){ return String(new Date().getFullYear() % 100).padStart(2,'0'); }
+function previewDocNumber(deptCode){
+  if(!deptCode) return '---/'+yyNow();
+  const yy = yyNow();
+  const last = (state.counters[deptCode] && state.counters[deptCode][yy]) || 0;
+  return String(last+1).padStart(3,'0') + '/' + yy;
+}
+function escapeHtml(s){
+  return String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+function toast(msg, isErr){
+  const wrap = document.getElementById('toastWrap');
+  const el = document.createElement('div');
+  el.className = 'toast' + (isErr ? ' err':'');
+  el.textContent = msg;
+  wrap.appendChild(el);
+  setTimeout(()=>{ el.style.opacity='0'; el.style.transition='opacity .3s'; setTimeout(()=>el.remove(),300); }, 2600);
+}
+async function tryLineWebhook(role, message){
+  const url = state.config.lineWebhooks && state.config.lineWebhooks[role];
+  if(!url) return;
+  try{
+    await fetch(url, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ role, message, at: nowIso() }) });
+  }catch(e){ console.warn('LINE relay webhook not reachable (check URL / CORS):', e); }
+}
+
+/* ============================= NOTIFICATIONS ============================= */
+async function pushNotification(toRole, orderId, docNumber, message){
+  const n = { id: uid(), toRole, orderId, docNumber, message, createdAt: nowIso(), read:false };
+  state.notifications.unshift(n);
+  await storeSet('notifications', state.notifications);
+  await tryLineWebhook(toRole, `[${docNumber}] ${message}`);
+}
+function unreadCountForRole(role){
+  return state.notifications.filter(n => n.toRole === role && !n.read).length;
+}
+
+/* ============================= PHOTO HANDLING ============================= */
+function resizeImageFile(file, maxW){
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = e => {
+      const img = new Image();
+      img.onload = () => {
+        const scale = Math.min(1, maxW / img.width);
+        const w = Math.round(img.width * scale), h = Math.round(img.height * scale);
+        const canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL('image/jpeg', 0.6));
+      };
+      img.onerror = reject;
+      img.src = e.target.result;
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+async function handlePhotoInput(files){
+  const remaining = 5 - state.form.photos.length;
+  if(remaining <= 0){ toast('แนบรูปได้สูงสุด 5 รูปต่อใบแจ้งซ่อม', true); return; }
+  const list = Array.from(files).slice(0, remaining);
+  for(const f of list){
+    if(!f.type.startsWith('image/')) continue;
+    try{
+      const dataUrl = await resizeImageFile(f, 900);
+      state.form.photos.push(dataUrl);
+    }catch(e){ console.error(e); }
+  }
+  render();
+}
+
+/* ============================= FORM ACTIONS ============================= */
+function selectDept(code){
+  state.form.dept = code;
+  state.form.machineCode = ''; state.form.machineName=''; state.form.machineSearch='';
+  render();
+}
+function updateFormField(field, value){
+  state.form[field] = value;
+  if(field === 'machineSearch'){ state.showMachineDropdown = true; }
+  render();
+}
+function pickMachine(code, name){
+  state.form.machineCode = code; state.form.machineName = name; state.form.machineSearch=''; state.showMachineDropdown=false;
+  render();
+}
+function clearMachine(){
+  state.form.machineCode=''; state.form.machineName=''; render();
+}
+function removePhoto(idx){
+  state.form.photos.splice(idx,1); render();
+}
+
+async function submitOrder(){
+  const f = state.form;
+  if(!f.dept){ toast('กรุณาเลือกแผนก', true); return; }
+  if(!f.machineCode){ toast('กรุณาเลือกรหัสเครื่องจักร', true); return; }
+  if(!f.cause || !f.cause.trim()){ toast('กรุณาระบุอาการ/สาเหตุที่ต้องการแจ้งซ่อม', true); return; }
+  if(!f.neededDate){ toast('กรุณาระบุวันที่ต้องการใช้งาน', true); return; }
+  if(!f.requestedBy || !f.requestedBy.trim()){ toast('กรุณาระบุชื่อผู้แจ้ง', true); return; }
+
+  // re-fetch counters right before incrementing to reduce race window
+  const freshCounters = await storeGet('counters');
+  state.counters = freshCounters || state.counters;
+  const yy = yyNow();
+  if(!state.counters[f.dept]) state.counters[f.dept] = {};
+  const last = state.counters[f.dept][yy] || 0;
+  const next = last + 1;
+  state.counters[f.dept][yy] = next;
+  const docNumber = String(next).padStart(3,'0') + '/' + yy;
+  await storeSet('counters', state.counters);
+
+  const id = uid();
+  const order = {
+    id, docNumber, department: f.dept, machineCode: f.machineCode, machineName: f.machineName,
+    cause: f.cause.trim(), neededDate: f.neededDate, requestedBy: f.requestedBy.trim(),
+    createdAt: nowIso(), status: 'PENDING_FM', photoCount: f.photos.length,
+    approvals: { fm:{status:null,by:'',at:'',note:''}, gm:{status:null,by:'',at:'',note:''} },
+    assignment: { technician:'', assignedBy:'', assignedAt:'' },
+    statusHistory: [{ status:'PENDING_FM', at: nowIso(), note:'สร้างใบแจ้งซ่อม โดย ' + f.requestedBy.trim() }],
+  };
+  state.orders.unshift(order);
+  await storeSet('orders', state.orders);
+  if(f.photos.length){ await storeSet('photos:'+id, f.photos); }
+
+  await pushNotification('fm', id, docNumber, `มีใบแจ้งซ่อมใหม่จากแผนก ${f.dept} รอการอนุมัติของท่าน`);
+
+  state.form = emptyForm();
+  toast(`ส่งใบแจ้งซ่อมเรียบร้อย เลขที่เอกสาร ${docNumber}`);
+  state.view = 'list';
+  render();
+}
+
+/* ============================= ORDER ACTIONS ============================= */
+function filteredMachines(){
+  const dept = state.form.dept;
+  if(!dept) return [];
+  const q = (state.form.machineSearch||'').trim().toLowerCase();
+  return state.config.machines.filter(m => m.dept === dept &&
+    (!q || m.code.toLowerCase().includes(q) || m.name.toLowerCase().includes(q)));
+}
+
+async function openDetail(id){
+  state.selectedOrderId = id;
+  state.view = 'detail';
+  state.ui.rejectBoxFor = null; state.ui.rejectReason='';
+  const photos = await storeGet('photos:'+id);
+  state.detailPhotos = photos || [];
+  // mark related notifications read for current role
+  let changed = false;
+  state.notifications.forEach(n => { if(n.orderId === id && n.toRole === state.role && !n.read){ n.read = true; changed = true; } });
+  if(changed) await storeSet('notifications', state.notifications);
+  render();
+}
+function backToList(){ state.view='list'; state.selectedOrderId=null; render(); }
+function getOrder(id){ return state.orders.find(o => o.id === id); }
+
+async function persistOrders(){ await storeSet('orders', state.orders); }
+
+async function approveFm(id){
+  const o = getOrder(id); if(!o) return;
+  o.approvals.fm = { status:'approved', by: ROLES.fm.label, at: nowIso(), note:'' };
+  o.status = 'PENDING_GM';
+  o.statusHistory.push({ status:'PENDING_GM', at: nowIso(), note:'ผู้จัดการโรงงานอนุมัติแล้ว' });
+  await persistOrders();
+  await pushNotification('gm', id, o.docNumber, `ใบแจ้งซ่อมแผนก ${o.department} ผ่านการอนุมัติของผู้จัดการโรงงานแล้ว รอการอนุมัติของท่าน`);
+  toast('อนุมัติแล้ว ส่งต่อให้ผู้จัดการทั่วไป');
+  render();
+}
+async function rejectFm(id){
+  const o = getOrder(id); if(!o) return;
+  const reason = state.ui.rejectReason.trim() || 'ไม่ระบุเหตุผล';
+  o.approvals.fm = { status:'rejected', by: ROLES.fm.label, at: nowIso(), note: reason };
+  o.status = 'REJECTED';
+  o.statusHistory.push({ status:'REJECTED', at: nowIso(), note:'ผู้จัดการโรงงานไม่อนุมัติ: ' + reason });
+  await persistOrders();
+  await pushNotification('requester', id, o.docNumber, `ใบแจ้งซ่อมของท่านไม่ได้รับการอนุมัติจากผู้จัดการโรงงาน (${reason})`);
+  toast('บันทึกการไม่อนุมัติแล้ว');
+  state.ui.rejectBoxFor=null; state.ui.rejectReason='';
+  render();
+}
+async function approveGm(id){
+  const o = getOrder(id); if(!o) return;
+  o.approvals.gm = { status:'approved', by: ROLES.gm.label, at: nowIso(), note:'' };
+  o.status = 'PENDING_ASSIGN';
+  o.statusHistory.push({ status:'PENDING_ASSIGN', at: nowIso(), note:'ผู้จัดการทั่วไปอนุมัติแล้ว' });
+  await persistOrders();
+  await pushNotification('maint', id, o.docNumber, `ใบแจ้งซ่อมแผนก ${o.department} ผ่านการอนุมัติครบแล้ว กรุณามอบหมายช่างผู้รับผิดชอบ`);
+  toast('อนุมัติแล้ว ส่งต่อให้ผู้จัดการแผนกซ่อมบำรุง');
+  render();
+}
+async function rejectGm(id){
+  const o = getOrder(id); if(!o) return;
+  const reason = state.ui.rejectReason.trim() || 'ไม่ระบุเหตุผล';
+  o.approvals.gm = { status:'rejected', by: ROLES.gm.label, at: nowIso(), note: reason };
+  o.status = 'REJECTED';
+  o.statusHistory.push({ status:'REJECTED', at: nowIso(), note:'ผู้จัดการทั่วไปไม่อนุมัติ: ' + reason });
+  await persistOrders();
+  await pushNotification('requester', id, o.docNumber, `ใบแจ้งซ่อมของท่านไม่ได้รับการอนุมัติจากผู้จัดการทั่วไป (${reason})`);
+  toast('บันทึกการไม่อนุมัติแล้ว');
+  state.ui.rejectBoxFor=null; state.ui.rejectReason='';
+  render();
+}
+async function assignTechnician(id){
+  const o = getOrder(id); if(!o) return;
+  const tech = state.ui.assignTech;
+  if(!tech){ toast('กรุณาเลือกชื่อช่างผู้รับผิดชอบ', true); return; }
+  o.assignment = { technician: tech, assignedBy: ROLES.maint.label, assignedAt: nowIso() };
+  o.status = 'ASSIGNED';
+  o.statusHistory.push({ status:'ASSIGNED', at: nowIso(), note:'มอบหมายงานให้ ' + tech });
+  await persistOrders();
+  await pushNotification('requester', id, o.docNumber, `งานซ่อมของท่านถูกมอบหมายให้ ${tech} แล้ว สถานะ: รอดำเนินการ`);
+  toast('มอบหมายงานเรียบร้อย');
+  render();
+}
+async function startRepair(id){
+  const o = getOrder(id); if(!o) return;
+  o.status = 'IN_PROGRESS';
+  o.statusHistory.push({ status:'IN_PROGRESS', at: nowIso(), note: (o.assignment.technician||'ช่าง') + ' เริ่มดำเนินการซ่อม' });
+  await persistOrders();
+  await pushNotification('requester', id, o.docNumber, `งานซ่อมของท่านสถานะ: กำลังซ่อม`);
+  toast('อัปเดตสถานะ: กำลังซ่อม');
+  render();
+}
+async function finishRepair(id){
+  const o = getOrder(id); if(!o) return;
+  o.status = 'DONE';
+  o.statusHistory.push({ status:'DONE', at: nowIso(), note:'ซ่อมเรียบร้อย' });
+  await persistOrders();
+  await pushNotification('requester', id, o.docNumber, `งานซ่อมของท่านเสร็จสิ้นแล้ว สถานะ: ซ่อมเรียบร้อย`);
+  toast('อัปเดตสถานะ: ซ่อมเรียบร้อย');
+  render();
+}
+
+/* ============================= SETTINGS ACTIONS ============================= */
+async function addDept(){
+  const code = (state.ui.newMachine.deptCodeInput||'').trim().toUpperCase();
+  if(!code) return;
+  if(state.config.departments.some(d=>d.code===code)){ toast('มีรหัสแผนกนี้อยู่แล้ว', true); return; }
+  state.config.departments.push({ code, name: code });
+  await storeSet('config', state.config);
+  toast('เพิ่มแผนกแล้ว'); render();
+}
+async function removeDept(code){
+  state.config.departments = state.config.departments.filter(d=>d.code!==code);
+  await storeSet('config', state.config);
+  render();
+}
+async function addMachine(){
+  const m = state.ui.newMachine;
+  if(!m.code || !m.name || !m.dept){ toast('กรอกรหัส ชื่อเครื่อง และแผนกให้ครบ', true); return; }
+  if(state.config.machines.some(x=>x.code.toLowerCase()===m.code.toLowerCase())){ toast('มีรหัสเครื่องนี้อยู่แล้ว', true); return; }
+  state.config.machines.push({ code:m.code.trim(), name:m.name.trim(), dept:m.dept });
+  await storeSet('config', state.config);
+  state.ui.newMachine = {code:'',name:'',dept:''};
+  toast('เพิ่มรหัสเครื่องจักรแล้ว'); render();
+}
+async function removeMachine(code){
+  state.config.machines = state.config.machines.filter(m=>m.code!==code);
+  await storeSet('config', state.config);
+  render();
+}
+async function addTech(){
+  const name = state.ui.newTechName.trim();
+  if(!name) return;
+  state.config.technicians.push(name);
+  await storeSet('config', state.config);
+  state.ui.newTechName='';
+  render();
+}
+async function removeTech(name){
+  state.config.technicians = state.config.technicians.filter(t=>t!==name);
+  await storeSet('config', state.config);
+  render();
+}
+async function saveWebhook(){
+  const role = state.ui.newWebhookRole;
+  state.config.lineWebhooks[role] = state.ui.newWebhookUrl.trim();
+  await storeSet('config', state.config);
+  toast('บันทึก Webhook สำหรับ ' + ROLES[role].label + ' แล้ว');
+  render();
+}
+async function resetAllData(){
+  state.config = { departments: DEPT_DEFAULT, machines: MACHINES_DEFAULT, technicians: TECH_DEFAULT, lineWebhooks:{} };
+  state.counters = {}; state.orders = []; state.notifications = [];
+  await storeSet('config', state.config); await storeSet('counters', state.counters);
+  await storeSet('orders', state.orders); await storeSet('notifications', state.notifications);
+  toast('ล้างข้อมูลระบบเรียบร้อย');
+  render();
+}
+
+/* ============================= RENDER: HEADER / NAV ============================= */
+function setRole(r){ state.role = r; state.ui.rejectBoxFor=null; render(); }
+function setView(v){ state.view = v; render(); }
+
+function renderHeader(){
+  const roleOpts = Object.keys(ROLES).map(k => `<option value="${k}" ${state.role===k?'selected':''}>${ROLES[k].icon} ${ROLES[k].label}</option>`).join('');
+  return `
+  <header class="topbar">
+    <div class="brand">
+      <div class="logo">🛠</div>
+      <div>
+        <h1>ระบบแจ้งซ่อมเครื่องจักร</h1>
+        <div class="sub">Maintenance Work Order System</div>
+      </div>
+    </div>
+    <div class="role-select">
+      <span>บทบาทปัจจุบัน:</span>
+      <select onchange="setRole(this.value)">${roleOpts}</select>
+    </div>
+  </header>
+  <nav class="tabs">
+    <button class="${state.view==='new'?'active':''}" onclick="setView('new')">➕ แจ้งซ่อมใหม่</button>
+    <button class="${state.view==='list'||state.view==='detail'?'active':''}" onclick="setView('list')">📋 รายการแจ้งซ่อม</button>
+    <button class="${state.view==='notif'?'active':''}" onclick="setView('notif')">🔔 การแจ้งเตือน${unreadCountForRole(state.role)>0?`<span class="badge">${unreadCountForRole(state.role)}</span>`:''}</button>
+    <button class="${state.view==='settings'?'active':''}" onclick="setView('settings')">⚙️ ตั้งค่าข้อมูลหลัก</button>
+  </nav>`;
+}
+
+/* ============================= RENDER: NEW REQUEST ============================= */
+function renderNew(){
+  const f = state.form;
+  const deptButtons = state.config.departments.map(d => `
+    <button class="dept-btn ${f.dept===d.code?'selected':''}" onclick="selectDept('${d.code}')">
+      ${d.code}<span class="full-name">${escapeHtml(d.name)}</span>
+    </button>`).join('');
+
+  let machineSection = '';
+  if(f.dept){
+    if(f.machineCode){
+      machineSection = `
+        <div class="selected-machine">
+          <span><b class="mono">${escapeHtml(f.machineCode)}</b> — ${escapeHtml(f.machineName)}</span>
+          <button onclick="clearMachine()">เปลี่ยนเครื่อง</button>
+        </div>`;
+    } else {
+      const results = filteredMachines();
+      const dropdown = state.showMachineDropdown ? `
+        <div class="search-results">
+          ${results.length ? results.map(m=>`
+            <div class="search-item" onclick="pickMachine('${m.code}', '${escapeHtml(m.name).replace(/'/g,"\\'")}')">
+              <b class="code">${escapeHtml(m.code)}</b> — ${escapeHtml(m.name)}
+            </div>`).join('') : `<div class="search-item" style="color:var(--slate)">ไม่พบรหัสเครื่องจักรของแผนก ${f.dept} — เพิ่มได้ที่หน้าตั้งค่า</div>`}
+        </div>` : '';
+      machineSection = `
+        <div class="search-wrap">
+          <input class="input" placeholder="พิมพ์ค้นหารหัสหรือชื่อเครื่องจักรในแผนก ${f.dept}..."
+            value="${escapeHtml(f.machineSearch)}"
+            oninput="updateFormField('machineSearch', this.value)"
+            onfocus="state.showMachineDropdown=true; render();">
+          ${dropdown}
+        </div>`;
+    }
+  } else {
+    machineSection = `<div style="color:var(--slate-light); font-size:13px;">กรุณาเลือกแผนกก่อน เพื่อกรองรหัสเครื่องจักรของแผนกนั้น</div>`;
+  }
+
+  const photoThumbs = f.photos.map((p,i) => `
+    <div class="photo-thumb"><img src="${p}"><button class="rm" onclick="removePhoto(${i})">✕</button></div>`).join('');
+
+  return `
+  <h2 class="view-title">แจ้งซ่อมใหม่</h2>
+  <p class="view-sub">กรอกรายละเอียดใบแจ้งซ่อม ระบบจะออกเลขที่เอกสารและแจ้งเตือนผู้อนุมัติให้อัตโนมัติ</p>
+  <div class="card">
+    <div class="field">
+      <label class="field-label">1. เลือกแผนกที่ต้องการแจ้งซ่อม <span class="req-star">*</span></label>
+      <div class="dept-grid">${deptButtons}</div>
+    </div>
+
+    <div class="docnum-box">
+      <span class="doc-chip">${previewDocNumber(f.dept)}</span>
+      <span class="hint">เลขที่ใบแจ้งซ่อม (รันอัตโนมัติตามแผนกที่เลือก — ยืนยันเมื่อกดส่งใบแจ้งซ่อม)</span>
+    </div>
+
+    <div class="field">
+      <label class="field-label">2. รหัสเครื่องจักร <span class="req-star">*</span></label>
+      ${machineSection}
+    </div>
+
+    <div class="field">
+      <label class="field-label">3. อาการ / สาเหตุที่ต้องการแจ้งซ่อม <span class="req-star">*</span></label>
+      <textarea class="input" placeholder="อธิบายอาการเสีย หรือสาเหตุที่พบ..." oninput="updateFormField('cause', this.value)">${escapeHtml(f.cause)}</textarea>
+    </div>
+
+    <div class="field">
+      <label class="field-label">แนบรูปภาพประกอบ (สูงสุด 5 รูป)</label>
+      <label class="photo-drop" for="photoInput">📷 แตะเพื่อเลือกรูปภาพ หรือถ่ายภาพใหม่</label>
+      <input id="photoInput" type="file" accept="image/*" multiple style="display:none" onchange="handlePhotoInput(this.files)">
+      <div class="photo-thumbs">${photoThumbs}</div>
+    </div>
+
+    <div class="grid-2">
+      <div class="field">
+        <label class="field-label">4. วันที่ต้องการใช้งาน <span class="req-star">*</span></label>
+        <input class="input" type="date" value="${f.neededDate}" oninput="updateFormField('neededDate', this.value)">
+      </div>
+      <div class="field">
+        <label class="field-label">ชื่อผู้แจ้ง <span class="req-star">*</span></label>
+        <input class="input" type="text" placeholder="ชื่อ-นามสกุล" value="${escapeHtml(f.requestedBy)}" oninput="updateFormField('requestedBy', this.value)">
+      </div>
+    </div>
+
+    <button class="btn btn-primary btn-block" onclick="submitOrder()">📨 ส่งใบแจ้งซ่อม</button>
+  </div>`;
+}
+
+/* ============================= RENDER: LIST ============================= */
+function renderList(){
+  const deptOpts = ['ALL', ...state.config.departments.map(d=>d.code)];
+  let orders = state.orders.filter(o =>
+    (state.filterStatus==='ALL' || o.status===state.filterStatus) &&
+    (state.filterDept==='ALL' || o.department===state.filterDept)
+  );
+  const cards = orders.map(o => {
+    const meta = STATUS_META[o.status];
+    return `
+    <div class="order-card" style="border-left-color:${meta.color}">
+      <div class="order-top">
+        <div>
+          <span class="doc-chip" style="font-size:14px; padding:3px 9px;">${o.docNumber}</span>
+          <span style="margin-left:8px; font-weight:600; color:var(--navy);">${o.department}</span>
+        </div>
+        <span class="status-pill" style="color:${meta.color}; background:${meta.bg};">${meta.label}</span>
+      </div>
+      <div class="order-body">
+        <div><b class="mono">${escapeHtml(o.machineCode)}</b> — ${escapeHtml(o.machineName)}</div>
+        <div class="cause">${escapeHtml(o.cause.length>90 ? o.cause.slice(0,90)+'…' : o.cause)}</div>
+        <div class="order-meta">ผู้แจ้ง: ${escapeHtml(o.requestedBy)} • ต้องการใช้งาน: ${fmtDate(o.neededDate)} • แจ้งเมื่อ ${fmtDateTime(o.createdAt)}</div>
+      </div>
+      <div class="order-actions">
+        <button class="btn btn-outline btn-sm" onclick="openDetail('${o.id}')">ดูรายละเอียด →</button>
+      </div>
+    </div>`;
+  }).join('');
+
+  return `
+  <h2 class="view-title">รายการแจ้งซ่อม</h2>
+  <p class="view-sub">ทั้งหมด ${state.orders.length} รายการ</p>
+  <div class="filters">
+    <select onchange="state.filterDept=this.value; render();">
+      ${deptOpts.map(d=>`<option value="${d}" ${state.filterDept===d?'selected':''}>${d==='ALL'?'ทุกแผนก':d}</option>`).join('')}
+    </select>
+    <select onchange="state.filterStatus=this.value; render();">
+      <option value="ALL" ${state.filterStatus==='ALL'?'selected':''}>ทุกสถานะ</option>
+      ${Object.keys(STATUS_META).map(s=>`<option value="${s}" ${state.filterStatus===s?'selected':''}>${STATUS_META[s].label}</option>`).join('')}
+    </select>
+  </div>
+  ${orders.length ? cards : `<div class="empty-state"><div class="big">🗒️</div>ยังไม่มีใบแจ้งซ่อมตามเงื่อนไขที่เลือก</div>`}
+  `;
+}
+
+/* ============================= RENDER: DETAIL ============================= */
+function renderDetail(){
+  const o = getOrder(state.selectedOrderId);
+  if(!o) return `<button class="back-link" onclick="backToList()">← กลับ</button><div class="empty-state">ไม่พบใบแจ้งซ่อมนี้</div>`;
+  const meta = STATUS_META[o.status];
+
+  const timeline = o.statusHistory.map(h => `
+    <div class="timeline-item">
+      <div>${STATUS_META[h.status] ? STATUS_META[h.status].label : h.status} — ${escapeHtml(h.note||'')}</div>
+      <div class="t-time">${fmtDateTime(h.at)}</div>
+    </div>`).join('');
+
+  const gallery = state.detailPhotos.length ? `
+    <div class="kv"><div class="k">รูปภาพประกอบ</div>
+      <div class="gallery">${state.detailPhotos.map(p=>`<img src="${p}">`).join('')}</div>
+    </div>` : '';
+
+  // action box depending on role + status
+  let actionBox = '';
+  const rejectingThis = state.ui.rejectBoxFor === o.id;
+
+  if(state.role==='fm' && o.status==='PENDING_FM'){
+    actionBox = `
+    <div class="action-box">
+      <h4>รออนุมัติจากผู้จัดการโรงงาน</h4>
+      <div class="order-actions">
+        <button class="btn btn-success" onclick="approveFm('${o.id}')">✓ อนุมัติ</button>
+        <button class="btn btn-danger-outline" onclick="state.ui.rejectBoxFor='${o.id}'; render();">✕ ไม่อนุมัติ</button>
+      </div>
+      ${rejectingThis ? `
+      <div class="reject-box">
+        <label class="field-label">เหตุผลที่ไม่อนุมัติ</label>
+        <textarea class="input" oninput="state.ui.rejectReason=this.value" placeholder="ระบุเหตุผล..."></textarea>
+        <div class="order-actions">
+          <button class="btn btn-danger-outline btn-sm" onclick="rejectFm('${o.id}')">ยืนยันไม่อนุมัติ</button>
+          <button class="btn btn-outline btn-sm" onclick="state.ui.rejectBoxFor=null; render();">ยกเลิก</button>
+        </div>
+      </div>` : ''}
+    </div>`;
+  } else if(state.role==='gm' && o.status==='PENDING_GM'){
+    actionBox = `
+    <div class="action-box">
+      <h4>รออนุมัติจากผู้จัดการทั่วไป</h4>
+      <div class="order-actions">
+        <button class="btn btn-success" onclick="approveGm('${o.id}')">✓ อนุมัติ</button>
+        <button class="btn btn-danger-outline" onclick="state.ui.rejectBoxFor='${o.id}'; render();">✕ ไม่อนุมัติ</button>
+      </div>
+      ${rejectingThis ? `
+      <div class="reject-box">
+        <label class="field-label">เหตุผลที่ไม่อนุมัติ</label>
+        <textarea class="input" oninput="state.ui.rejectReason=this.value" placeholder="ระบุเหตุผล..."></textarea>
+        <div class="order-actions">
+          <button class="btn btn-danger-outline btn-sm" onclick="rejectGm('${o.id}')">ยืนยันไม่อนุมัติ</button>
+          <button class="btn btn-outline btn-sm" onclick="state.ui.rejectBoxFor=null; render();">ยกเลิก</button>
+        </div>
+      </div>` : ''}
+    </div>`;
+  } else if(state.role==='maint' && o.status==='PENDING_ASSIGN'){
+    const techOpts = state.config.technicians.map(t=>`<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join('');
+    actionBox = `
+    <div class="action-box">
+      <h4>มอบหมายช่างผู้รับผิดชอบ</h4>
+      <div class="inline-form">
+        <select class="input" onchange="state.ui.assignTech=this.value">
+          <option value="">-- เลือกช่าง --</option>${techOpts}
+        </select>
+        <button class="btn btn-primary" onclick="assignTechnician('${o.id}')">มอบหมายงาน</button>
+      </div>
+    </div>`;
+  } else if(state.role==='maint' && o.status==='ASSIGNED'){
+    actionBox = `
+    <div class="action-box">
+      <h4>งานถูกมอบหมายแล้ว — รอเริ่มดำเนินการ</h4>
+      <div class="order-actions"><button class="btn btn-primary" onclick="startRepair('${o.id}')">▶ เริ่มดำเนินการซ่อม</button></div>
+    </div>`;
+  } else if(state.role==='maint' && o.status==='IN_PROGRESS'){
+    actionBox = `
+    <div class="action-box">
+      <h4>กำลังซ่อม</h4>
+      <div class="order-actions"><button class="btn btn-success" onclick="finishRepair('${o.id}')">✓ ซ่อมเสร็จสิ้น</button></div>
+    </div>`;
+  }
+
+  return `
+  <button class="back-link" onclick="backToList()">← กลับไปรายการแจ้งซ่อม</button>
+  <div class="detail-head">
+    <div>
+      <span class="doc-chip">${o.docNumber}</span>
+      <h2 class="view-title" style="display:inline-block; margin-left:10px;">แผนก ${o.department}</h2>
+    </div>
+    <span class="status-pill" style="color:${meta.color}; background:${meta.bg}; font-size:13px; padding:6px 14px;">${meta.label}</span>
+  </div>
+  <div class="card">
+    <div class="grid-2">
+      <div class="kv"><div class="k">รหัสเครื่องจักร</div><div class="v mono">${escapeHtml(o.machineCode)}</div></div>
+      <div class="kv"><div class="k">ชื่อเครื่องจักร</div><div class="v">${escapeHtml(o.machineName)}</div></div>
+      <div class="kv"><div class="k">ผู้แจ้ง</div><div class="v">${escapeHtml(o.requestedBy)}</div></div>
+      <div class="kv"><div class="k">วันที่ต้องการใช้งาน</div><div class="v">${fmtDate(o.neededDate)}</div></div>
+      <div class="kv"><div class="k">แจ้งเมื่อ</div><div class="v">${fmtDateTime(o.createdAt)}</div></div>
+      <div class="kv"><div class="k">ช่างผู้รับผิดชอบ</div><div class="v">${o.assignment.technician ? escapeHtml(o.assignment.technician) : '—'}</div></div>
+    </div>
+    <div class="kv"><div class="k">อาการ / สาเหตุ</div><div class="v">${escapeHtml(o.cause)}</div></div>
+    ${gallery}
+    ${actionBox}
+    <div class="kv" style="margin-top:20px;"><div class="k">ลำดับเหตุการณ์</div><div class="timeline">${timeline}</div></div>
+  </div>`;
+}
+
+/* ============================= RENDER: NOTIFICATIONS ============================= */
+async function markAllRead(){
+  state.notifications.forEach(n => { if(n.toRole===state.role) n.read = true; });
+  await storeSet('notifications', state.notifications);
+  render();
+}
+function renderNotif(){
+  const mine = state.notifications.filter(n => n.toRole === state.role);
+  const items = mine.map(n => `
+    <div class="notif-item ${n.read?'':'unread'}">
+      <div class="notif-icon">🔔</div>
+      <div>
+        <div class="notif-text"><b class="mono">${n.docNumber}</b> — ${escapeHtml(n.message)}</div>
+        <div class="notif-time">${fmtDateTime(n.createdAt)}</div>
+      </div>
+    </div>`).join('');
+  return `
+  <h2 class="view-title">การแจ้งเตือน — ${ROLES[state.role].label}</h2>
+  <p class="view-sub">การแจ้งเตือนในระบบสำหรับบทบาทนี้ (พร้อมส่งต่อไปยัง LINE หากตั้งค่า Webhook ไว้ในหน้าตั้งค่า)</p>
+  ${mine.length ? `<div style="margin-bottom:12px;"><button class="btn btn-outline btn-sm" onclick="markAllRead()">ทำเครื่องหมายว่าอ่านแล้วทั้งหมด</button></div>` : ''}
+  ${mine.length ? items : `<div class="empty-state"><div class="big">📭</div>ยังไม่มีการแจ้งเตือนสำหรับบทบาทนี้</div>`}
+  `;
+}
+
+/* ============================= RENDER: SETTINGS ============================= */
+function renderSettings(){
+  const deptRows = state.config.departments.map(d => `
+    <tr><td class="mono">${d.code}</td><td>${escapeHtml(d.name)}</td>
+      <td><button class="del" onclick="removeDept('${d.code}')">ลบ</button></td></tr>`).join('');
+
+  const machineRows = state.config.machines.map(m => `
+    <tr><td class="mono">${escapeHtml(m.code)}</td><td>${escapeHtml(m.name)}</td><td>${m.dept}</td>
+      <td><button class="del" onclick="removeMachine('${m.code}')">ลบ</button></td></tr>`).join('');
+
+  const deptOptsForMachine = state.config.departments.map(d=>`<option value="${d.code}">${d.code}</option>`).join('');
+
+  const techChips = state.config.technicians.map(t => `
+    <div class="chip">${escapeHtml(t)}<button onclick="removeTech('${escapeHtml(t).replace(/'/g,"\\'")}')">✕</button></div>`).join('');
+
+  const webhookRoleOpts = ['fm','gm','maint','requester'].map(r=>`<option value="${r}">${ROLES[r].label}</option>`).join('');
+  const webhookRows = ['fm','gm','maint','requester'].map(r => `
+    <tr><td>${ROLES[r].label}</td><td class="mono" style="word-break:break-all;">${state.config.lineWebhooks[r] ? escapeHtml(state.config.lineWebhooks[r]) : '<span style="color:var(--slate-light)">ยังไม่ได้ตั้งค่า</span>'}</td></tr>`).join('');
+
+  return `
+  <h2 class="view-title">ตั้งค่าข้อมูลหลัก</h2>
+  <p class="view-sub">จัดการแผนก รหัสเครื่องจักร รายชื่อช่าง และการเชื่อมต่อแจ้งเตือน LINE</p>
+
+  <div class="note-box">
+    ⚠️ <b>เกี่ยวกับการแจ้งเตือน LINE:</b> LINE Notify ปิดให้บริการแล้วตั้งแต่ 31 มี.ค. 2568 การส่งข้อความ LINE จริงในปัจจุบันต้องใช้ LINE Official Account + Messaging API ซึ่งต้องมีระบบหลังบ้าน (server) เก็บ token อย่างปลอดภัย — ไม่สามารถฝังไว้ในหน้าเว็บนี้ได้โดยตรง
+    ระบบนี้จึงมี "การแจ้งเตือนในระบบ" ให้ใช้งานได้ทันที และมีช่อง Webhook URL ด้านล่างสำหรับต่อยอด: หากท่านตั้งค่า relay ผ่าน Google Apps Script / n8n / Make.com ที่รับ POST แล้วส่งต่อเข้า LINE Messaging API เอง ระบบจะยิงข้อมูลไปที่ URL นั้นให้อัตโนมัติทุกครั้งที่มีการเปลี่ยนสถานะ
+  </div>
+
+  <div class="settings-section card">
+    <h3>แผนก</h3>
+    <p class="desc">แผนกที่แสดงในหน้าแจ้งซ่อมใหม่</p>
+    <table class="mini"><tr><th>รหัส</th><th>ชื่อ</th><th></th></tr>${deptRows}</table>
+    <div class="inline-form">
+      <input class="input" placeholder="รหัสแผนกใหม่ เช่น MT" oninput="state.ui.newMachine.deptCodeInput=this.value">
+      <button class="btn btn-outline btn-sm" onclick="addDept()">+ เพิ่มแผนก</button>
+    </div>
+  </div>
+
+  <div class="settings-section card">
+    <h3>รหัสเครื่องจักร</h3>
+    <p class="desc">ระบบจะกรองให้เลือกเฉพาะเครื่องจักรของแผนกที่เลือกเท่านั้น แก้ไข/เพิ่มรายการจริงของโรงงานได้ที่นี่</p>
+    <table class="mini"><tr><th>รหัส</th><th>ชื่อเครื่องจักร</th><th>แผนก</th><th></th></tr>${machineRows}</table>
+    <div class="inline-form">
+      <input class="input" placeholder="รหัสเครื่อง" oninput="state.ui.newMachine.code=this.value" value="${escapeHtml(state.ui.newMachine.code||'')}">
+      <input class="input" placeholder="ชื่อเครื่องจักร" oninput="state.ui.newMachine.name=this.value" value="${escapeHtml(state.ui.newMachine.name||'')}">
+      <select class="input" onchange="state.ui.newMachine.dept=this.value"><option value="">แผนก</option>${deptOptsForMachine}</select>
+      <button class="btn btn-outline btn-sm" onclick="addMachine()">+ เพิ่มเครื่องจักร</button>
+    </div>
+  </div>
+
+  <div class="settings-section card">
+    <h3>รายชื่อช่างซ่อมบำรุง</h3>
+    <p class="desc">ใช้สำหรับให้ผู้จัดการแผนกซ่อมบำรุงเลือกมอบหมายงาน</p>
+    <div class="chip-row">${techChips}</div>
+    <div class="inline-form">
+      <input class="input" placeholder="ชื่อช่างใหม่" value="${escapeHtml(state.ui.newTechName)}" oninput="state.ui.newTechName=this.value">
+      <button class="btn btn-outline btn-sm" onclick="addTech()">+ เพิ่มช่าง</button>
+    </div>
+  </div>
+
+  <div class="settings-section card">
+    <h3>การเชื่อมต่อแจ้งเตือน LINE (ทางเลือกเสริม)</h3>
+    <p class="desc">ใส่ Webhook URL ของ relay ที่ท่านตั้งค่าไว้ (ดูคำอธิบายด้านบน) — เว้นว่างได้หากยังไม่พร้อมใช้งาน</p>
+    <table class="mini"><tr><th>บทบาท</th><th>Webhook URL</th></tr>${webhookRows}</table>
+    <div class="inline-form">
+      <select class="input" onchange="state.ui.newWebhookRole=this.value">${webhookRoleOpts}</select>
+      <input class="input" placeholder="https://..." oninput="state.ui.newWebhookUrl=this.value">
+      <button class="btn btn-outline btn-sm" onclick="saveWebhook()">บันทึก</button>
+    </div>
+  </div>
+
+  <div class="settings-section card">
+    <h3>รีเซ็ตข้อมูลระบบ</h3>
+    <p class="desc">ล้างใบแจ้งซ่อม เลขที่เอกสาร และการแจ้งเตือนทั้งหมด กลับสู่ค่าเริ่มต้น (ใช้สำหรับทดสอบระบบ)</p>
+    <button class="btn btn-danger-outline btn-sm" onclick="resetAllData()">ล้างข้อมูลทั้งหมด</button>
+  </div>
+  `;
+}
+
+/* ============================= MAIN RENDER ============================= */
+function render(){
+  const app = document.getElementById('app');
+  if(!state.loaded){
+    app.innerHTML = `<div style="padding:60px; text-align:center; color:var(--slate);">กำลังโหลดระบบ...</div>`;
+    return;
+  }
+  let body = '';
+  if(state.view==='new') body = renderNew();
+  else if(state.view==='list') body = renderList();
+  else if(state.view==='detail') body = renderDetail();
+  else if(state.view==='notif') body = renderNotif();
+  else if(state.view==='settings') body = renderSettings();
+  app.innerHTML = renderHeader() + `<main>${body}</main>`;
+}
+
+/* ============================= INIT ============================= */
+(async function init(){
+  await loadAll();
+  render();
+})();
+</script>
+</body>
+</html>
