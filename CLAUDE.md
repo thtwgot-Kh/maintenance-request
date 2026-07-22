@@ -105,6 +105,17 @@ Two-tier storage model:
     `dd/MM/yy[ HH:mm]` (matching the client's `fmtDate`/`fmtDateTime`) before
     being written — raw ISO strings in the Sheet are a past bug, not a
     format choice.
+- **`สิทธิ์ผู้ใช้ LINE` tab (columns: `userId | บทบาท | ชื่อช่าง`)** — controls
+  who can log into the app and which role(s) they see. One row per
+  (userId, role) pair; a person with multiple roles gets multiple rows.
+  The 3rd column (`ชื่อช่าง`) is only meaningful on rows where บทบาท =
+  `tech` — it must exactly match a name in the **ช่าง** tab, and is what
+  lets the app know *which* technician a given `tech`-role LINE login is
+  (used to restrict start/finish-repair actions to only that person's own
+  assigned orders — see `assignedTechs(o).includes(state.myTechName)` in
+  `index.html`). `doGet('userRoles', ...)` returns `{ roles: [...],
+  techName: '...' }` (not a bare array) — `readUserRoles_()` in the Apps
+  Script reads all 3 columns.
 - `resyncAll()` — run manually from the Apps Script editor (function
   dropdown → `resyncAll` → Run) any time the mirror-writing code changes, to
   re-apply formatting/dropdowns/colors to already-saved data. Editing the
@@ -240,7 +251,20 @@ in git.
   hold in `สิทธิ์ผู้ใช้ LINE` to log into the app themselves (distinct from
   the per-name LINE push routing above, which is what makes an
   *assignment* notification personal). `tech` was also added to the
-  Settings → LINE Webhook role list. No view/permissions are currently
-  gated on `role==='tech'` yet — only `maint` can assign/start/finish
-  repairs today; deciding whether technicians should get their own
-  view of assigned jobs is still open.
+  Settings → LINE Webhook role list.
+- **Assigning a job now requires a planned start date and end date**
+  (`assignment.startDate`/`.endDate`, two `<input type="date">` fields on
+  the `PENDING_ASSIGN` assign screen) — `assignTechnician()` in
+  `index.html` refuses to save (`toast(..., true)`) if either is blank, or
+  if the end date is before the start date. Both dates are shown on the
+  order detail page once assigned, and included in the per-technician
+  personal LINE ping.
+- **Starting/finishing a repair (`ASSIGNED`→`IN_PROGRESS`→`DONE`) is now
+  gated on `role==='tech'` AND being one of the order's own assigned
+  technicians** — `maint` only approves and assigns now; the technician
+  side does the rest, and only for orders assigned to them personally
+  (`assignedTechs(o).includes(state.myTechName)` in `index.html`).
+  `state.myTechName` comes from the `ชื่อช่าง` column of `สิทธิ์ผู้ใช้ LINE`
+  (see above) via `doGet('userRoles', ...)`'s `techName` field — a `tech`
+  account with no matching row there (or a name that doesn't exactly match
+  the **ช่าง** tab) won't see the start/finish buttons on any order.
