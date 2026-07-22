@@ -409,11 +409,14 @@ async function tryLineWebhook(role, message){
 }
 
 /* ============================= NOTIFICATIONS ============================= */
+function orderDeepLink(orderId, role){
+  return `${APP_URL}?order=${encodeURIComponent(orderId)}&role=${encodeURIComponent(role)}`;
+}
 async function pushNotification(toRole, orderId, docNumber, message){
   const n = { id: uid(), toRole, orderId, docNumber, message, createdAt: nowIso(), read:false };
   state.notifications.unshift(n);
   await storeSet('notifications', state.notifications);
-  await tryLineWebhook(toRole, `[${docNumber}] ${message}\n${APP_URL}`);
+  await tryLineWebhook(toRole, `[${docNumber}] ${message}\n${orderDeepLink(orderId, toRole)}`);
 }
 function unreadCountForRole(role){
   return state.notifications.filter(n => n.toRole === role && !n.read).length;
@@ -682,7 +685,7 @@ async function assignTechnician(id){
   await persistOrders();
   await pushNotification('requester', id, o.docNumber, `งานซ่อมของท่านถูกมอบหมายให้ ${techs.join(', ')} แล้ว สถานะ: รอดำเนินการ`);
   for(const tech of techs){
-    await tryLineWebhook(tech, `[${o.docNumber}] คุณได้รับมอบหมายงานซ่อม\nแผนก: ${o.department}\nเครื่องจักร: ${o.machineCode} — ${o.machineName}\nอาการ/รายละเอียด: ${o.cause}\nกำหนดงาน: ${fmtDate(startDate)} - ${fmtDate(endDate)}\n${APP_URL}`);
+    await tryLineWebhook(tech, `[${o.docNumber}] คุณได้รับมอบหมายงานซ่อม\nแผนก: ${o.department}\nเครื่องจักร: ${o.machineCode} — ${o.machineName}\nอาการ/รายละเอียด: ${o.cause}\nกำหนดงาน: ${fmtDate(startDate)} - ${fmtDate(endDate)}\n${orderDeepLink(o.id, 'tech')}`);
   }
   state.ui.assignTechs = [''];
   state.ui.assignStartDate = '';
@@ -1203,12 +1206,27 @@ async function pollForUpdates(){
 }
 
 /* ============================= INIT ============================= */
+/* รองรับลิงก์ลึกจากการแจ้งเตือน LINE: ?order=<id>&role=<role> เปิดตรงไปที่ใบแจ้งซ่อมนั้น
+   และสลับบทบาทให้ตรงกับผู้รับแจ้งเตือน (ถ้าบัญชีนี้มีสิทธิ์บทบาทนั้นจริง) */
 (async function init(){
   await authenticate();
   render();
   if(state.authStatus !== 'ok') return; // ยังไม่ล็อกอิน (redirect) หรือไม่มีสิทธิ์ - ไม่โหลดข้อมูลระบบ
   await loadAll();
-  render();
+
+  const params = new URLSearchParams(location.search);
+  const linkOrderId = params.get('order');
+  const linkRole = params.get('role');
+  if(linkRole && state.allowedRoles.includes(linkRole)){
+    state.role = linkRole;
+    if(linkRole === 'tech') state.myTechName = state.techIdentities[0] || '';
+  }
+  if(linkOrderId && getOrder(linkOrderId)){
+    history.replaceState(null, '', location.pathname);
+    await openDetail(linkOrderId);
+  } else {
+    render();
+  }
   setInterval(pollForUpdates, 7000);
 })();
 </script>
