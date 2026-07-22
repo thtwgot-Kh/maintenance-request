@@ -239,6 +239,7 @@ const ROLES = {
   fm:        { label:'ผู้จัดการโรงงาน (อนุมัติ 1)', icon:'🏭' },
   gm:        { label:'ผู้จัดการทั่วไป (อนุมัติ 2)', icon:'🗂️' },
   maint:     { label:'ผู้จัดการแผนกซ่อมบำรุง', icon:'🔧' },
+  tech:      { label:'ช่าง', icon:'🧰' },
   admin:     { label:'ผู้ดูแลระบบ (ตั้งค่า)', icon:'⚙️' },
 };
 const STATUS_META = {
@@ -288,7 +289,7 @@ let state = {
   detailPhotos: [],
   filterStatus: 'ALL',
   filterDept: 'ALL',
-  ui: { rejectBoxFor:null, rejectReason:'', assignTech:'', newWebhookRole:'fm', newWebhookUrl:'' },
+  ui: { rejectBoxFor:null, rejectReason:'', assignTechs:[''], newWebhookRole:'fm', newWebhookUrl:'' },
 };
 
 /* ============================= STORAGE HELPERS (Google Sheets via Apps Script) ============================= */
@@ -356,6 +357,12 @@ async function loadAll(){
 
 /* ============================= UTIL ============================= */
 function uid(){ return (crypto.randomUUID ? crypto.randomUUID() : 'id-'+Date.now()+'-'+Math.random().toString(16).slice(2)); }
+// รองรับข้อมูลเก่าที่ยังเป็น assignment.technician (string เดี่ยว) ก่อนเปลี่ยนเป็น technicians (array)
+function assignedTechs(o){
+  if(o.assignment.technicians && o.assignment.technicians.length) return o.assignment.technicians;
+  if(o.assignment.technician) return [o.assignment.technician];
+  return [];
+}
 function nowIso(){ return new Date().toISOString(); }
 function fmtDateTime(iso){
   const d = new Date(iso);
@@ -486,7 +493,7 @@ async function submitOrder(){
     cause: f.cause.trim(), neededDate: f.neededDate, requestedBy: f.requestedBy.trim(),
     createdAt: nowIso(), status: 'PENDING_FM', photoCount: f.photos.length,
     approvals: { fm:{status:null,by:'',at:'',note:''}, gm:{status:null,by:'',at:'',note:''} },
-    assignment: { technician:'', assignedBy:'', assignedAt:'' },
+    assignment: { technicians:[], assignedBy:'', assignedAt:'' },
     statusHistory: [{ status:'PENDING_FM', at: nowIso(), note:'สร้างใบแจ้งซ่อม โดย ' + f.requestedBy.trim() }],
   };
   state.orders.unshift(order);
@@ -571,23 +578,30 @@ async function rejectGm(id){
   state.ui.rejectBoxFor=null; state.ui.rejectReason='';
   render();
 }
+function addAssignTechRow(){ state.ui.assignTechs.push(''); render(); }
+function removeAssignTechRow(i){ state.ui.assignTechs.splice(i,1); render(); }
+function setAssignTech(i, v){ state.ui.assignTechs[i] = v; }
 async function assignTechnician(id){
   const o = getOrder(id); if(!o) return;
-  const tech = state.ui.assignTech;
-  if(!tech){ toast('กรุณาเลือกชื่อช่างผู้รับผิดชอบ', true); return; }
-  o.assignment = { technician: tech, assignedBy: ROLES.maint.label, assignedAt: nowIso() };
+  const techs = [...new Set(state.ui.assignTechs.filter(Boolean))];
+  if(!techs.length){ toast('กรุณาเลือกชื่อช่างผู้รับผิดชอบอย่างน้อย 1 คน', true); return; }
+  o.assignment = { technicians: techs, assignedBy: ROLES.maint.label, assignedAt: nowIso() };
   o.status = 'ASSIGNED';
-  o.statusHistory.push({ status:'ASSIGNED', at: nowIso(), note:'มอบหมายงานให้ ' + tech });
+  o.statusHistory.push({ status:'ASSIGNED', at: nowIso(), note:'มอบหมายงานให้ ' + techs.join(', ') });
   await persistOrders();
-  await pushNotification('requester', id, o.docNumber, `งานซ่อมของท่านถูกมอบหมายให้ ${tech} แล้ว สถานะ: รอดำเนินการ`);
-  await tryLineWebhook(tech, `[${o.docNumber}] คุณได้รับมอบหมายงานซ่อม\nแผนก: ${o.department}\nเครื่องจักร: ${o.machineCode} — ${o.machineName}\nอาการ/รายละเอียด: ${o.cause}\nต้องการใช้งานภายใน: ${fmtDate(o.neededDate)}\n${APP_URL}`);
+  await pushNotification('requester', id, o.docNumber, `งานซ่อมของท่านถูกมอบหมายให้ ${techs.join(', ')} แล้ว สถานะ: รอดำเนินการ`);
+  for(const tech of techs){
+    await tryLineWebhook(tech, `[${o.docNumber}] คุณได้รับมอบหมายงานซ่อม\nแผนก: ${o.department}\nเครื่องจักร: ${o.machineCode} — ${o.machineName}\nอาการ/รายละเอียด: ${o.cause}\nต้องการใช้งานภายใน: ${fmtDate(o.neededDate)}\n${APP_URL}`);
+  }
+  state.ui.assignTechs = [''];
   toast('มอบหมายงานเรียบร้อย');
   render();
 }
 async function startRepair(id){
   const o = getOrder(id); if(!o) return;
   o.status = 'IN_PROGRESS';
-  o.statusHistory.push({ status:'IN_PROGRESS', at: nowIso(), note: (o.assignment.technician||'ช่าง') + ' เริ่มดำเนินการซ่อม' });
+  const techLabel = assignedTechs(o).join(', ') || 'ช่าง';
+  o.statusHistory.push({ status:'IN_PROGRESS', at: nowIso(), note: techLabel + ' เริ่มดำเนินการซ่อม' });
   await persistOrders();
   await pushNotification('requester', id, o.docNumber, `งานซ่อมของท่านสถานะ: กำลังซ่อม`);
   toast('อัปเดตสถานะ: กำลังซ่อม');
@@ -847,14 +861,20 @@ function renderDetail(){
       </div>` : ''}
     </div>`;
   } else if(state.role==='maint' && o.status==='PENDING_ASSIGN'){
-    const techOpts = state.config.technicians.map(t=>`<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join('');
+    const rows = state.ui.assignTechs.map((val, i) => `
+      <div class="inline-form" style="margin-bottom:6px;">
+        <select class="input" onchange="setAssignTech(${i}, this.value)">
+          <option value="">-- เลือกช่าง --</option>
+          ${state.config.technicians.map(t=>`<option value="${escapeHtml(t)}" ${val===t?'selected':''}>${escapeHtml(t)}</option>`).join('')}
+        </select>
+        ${state.ui.assignTechs.length>1 ? `<button class="btn btn-outline btn-sm" onclick="removeAssignTechRow(${i})">✕</button>` : ''}
+      </div>`).join('');
     actionBox = `
     <div class="action-box">
       <h4>มอบหมายช่างผู้รับผิดชอบ</h4>
-      <div class="inline-form">
-        <select class="input" onchange="state.ui.assignTech=this.value">
-          <option value="">-- เลือกช่าง --</option>${techOpts}
-        </select>
+      ${rows}
+      <button class="btn btn-outline btn-sm" onclick="addAssignTechRow()">+ เพิ่มช่าง</button>
+      <div class="order-actions" style="margin-top:10px;">
         <button class="btn btn-primary" onclick="assignTechnician('${o.id}')">มอบหมายงาน</button>
       </div>
     </div>`;
@@ -888,7 +908,7 @@ function renderDetail(){
       <div class="kv"><div class="k">ผู้แจ้ง</div><div class="v">${escapeHtml(o.requestedBy)}</div></div>
       <div class="kv"><div class="k">วันที่ต้องการใช้งาน</div><div class="v">${fmtDate(o.neededDate)}</div></div>
       <div class="kv"><div class="k">แจ้งเมื่อ</div><div class="v">${fmtDateTime(o.createdAt)}</div></div>
-      <div class="kv"><div class="k">ช่างผู้รับผิดชอบ</div><div class="v">${o.assignment.technician ? escapeHtml(o.assignment.technician) : '—'}</div></div>
+      <div class="kv"><div class="k">ช่างผู้รับผิดชอบ</div><div class="v">${assignedTechs(o).length ? assignedTechs(o).map(escapeHtml).join(', ') : '—'}</div></div>
     </div>
     <div class="kv"><div class="k">อาการ / สาเหตุ</div><div class="v">${escapeHtml(o.cause)}</div></div>
     ${gallery}
@@ -923,8 +943,8 @@ function renderNotif(){
 
 /* ============================= RENDER: SETTINGS ============================= */
 function renderSettings(){
-  const webhookRoleOpts = ['fm','gm','maint','requester'].map(r=>`<option value="${r}">${ROLES[r].label}</option>`).join('');
-  const webhookRows = ['fm','gm','maint','requester'].map(r => `
+  const webhookRoleOpts = ['fm','gm','maint','tech','requester'].map(r=>`<option value="${r}">${ROLES[r].label}</option>`).join('');
+  const webhookRows = ['fm','gm','maint','tech','requester'].map(r => `
     <tr><td>${ROLES[r].label}</td><td class="mono" style="word-break:break-all;">${state.config.lineWebhooks[r] ? escapeHtml(state.config.lineWebhooks[r]) : '<span style="color:var(--slate-light)">ยังไม่ได้ตั้งค่า</span>'}</td></tr>`).join('');
 
   return `

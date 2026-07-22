@@ -149,16 +149,19 @@ Behavior:
   push API. **Falls back to broadcasting to every OA friend if no recipient
   is mapped for that role yet** — this is the current state for roles that
   haven't had a real person's `userId` assigned.
-  - `body.role` is not limited to the four app roles (fm/gm/maint/
-    requester) — `assignTechnician()` in `index.html` sends the assigned
-    technician's exact name (from the **ช่าง** tab / config.technicians) as
-    `role`, so a per-technician personal LINE ping goes out the moment a
-    job is assigned. To route that to the right person, add a row per
-    technician to `แจ้งเตือน LINE - ผู้รับ` with บทบาท = their exact name
-    string and userId = their LINE userId — same mechanism as the other
-    roles, no Apps Script changes needed. Until a technician has a row
-    there, their assignment ping falls back to the broadcast-to-everyone
-    behavior above.
+  - `body.role` is not limited to the app's named roles (fm/gm/maint/
+    tech/requester) — `assignTechnician()` in `index.html` sends each
+    assigned technician's exact name (from the **ช่าง** tab /
+    config.technicians) as `role`, so a per-technician personal LINE ping
+    goes out to every technician on the order the moment it's assigned. To
+    route that to the right person, add a row per technician to
+    `แจ้งเตือน LINE - ผู้รับ` with บทบาท = their exact name string and
+    userId = their LINE userId — same mechanism as the other roles, no
+    Apps Script changes needed. Until a technician has a row there, their
+    assignment ping falls back to the broadcast-to-everyone behavior above.
+    (This per-name routing is separate from the `tech` app role below —
+    `tech` is the role a technician's own LINE account holds to log into
+    the app; the per-name row is what makes the *assignment* ping personal.)
   - `tryLineWebhook(role, message)` in `index.html` no longer requires a
     webhook URL configured under that exact `role` key in Settings — it
     falls back to whichever webhook URL *is* configured (they're always the
@@ -218,3 +221,26 @@ in git.
   as `role`) — needs the same `แจ้งเตือน LINE - ผู้รับ` mapping filled in
   per technician once each has messaged the OA and shown up in `LINE
   Users`.
+- **A job can now be assigned to multiple technicians at once.** The assign
+  screen (maint role, `PENDING_ASSIGN` status) shows one technician picker
+  per row with a "+ เพิ่มช่าง" button to add more (unlimited, via
+  `state.ui.assignTechs`/`addAssignTechRow()`/`removeAssignTechRow()`); each
+  selected technician gets their own personal LINE ping via the same
+  per-name routing described above. Order data shape changed:
+  `order.assignment.technician` (single string) → `order.assignment.technicians`
+  (array of strings). `assignedTechs(o)` in `index.html` reads either shape
+  so orders assigned before this change still display correctly.
+  **The Apps Script "คำร้องแจ้งซ่อม" mirror code (not in this repo) still
+  reads the old singular `technician` field for the "ช่างผู้รับผิดชอบ"
+  column in the ใบแจ้งซ่อม sheet tab — it needs to be updated by hand to
+  read `technicians` (joined with a comma), with a fallback to the old
+  `technician` field for historical rows.**
+- Added a dedicated `tech` app role (label "ช่าง") to `ROLES` in
+  `index.html` — this is the role a technician's own LINE account would
+  hold in `สิทธิ์ผู้ใช้ LINE` to log into the app themselves (distinct from
+  the per-name LINE push routing above, which is what makes an
+  *assignment* notification personal). `tech` was also added to the
+  Settings → LINE Webhook role list. No view/permissions are currently
+  gated on `role==='tech'` yet — only `maint` can assign/start/finish
+  repairs today; deciding whether technicians should get their own
+  view of assigned jobs is still open.
