@@ -290,6 +290,7 @@ let state = {
 /* ============================= STORAGE HELPERS (Google Sheets via Apps Script) ============================= */
 const API_URL = 'https://script.google.com/macros/s/AKfycbxDWgbzb9_SHijHom8UqRZJF3NJBw149Nj973kuqaFuUnR0CM5_lD_fmLIeFBJ6mnVGPw/exec';
 const SHEET_URL = 'https://docs.google.com/spreadsheets/d/1er3WPCHJmV8_lioD-9gShr5mWDaajvXEYrEaaV-_p-k/edit';
+const APP_URL = 'https://thtwgot-kh.github.io/maintenance-request/';
 
 async function storeGet(key){
   try{
@@ -365,7 +366,7 @@ async function pushNotification(toRole, orderId, docNumber, message){
   const n = { id: uid(), toRole, orderId, docNumber, message, createdAt: nowIso(), read:false };
   state.notifications.unshift(n);
   await storeSet('notifications', state.notifications);
-  await tryLineWebhook(toRole, `[${docNumber}] ${message}`);
+  await tryLineWebhook(toRole, `[${docNumber}] ${message}\n${APP_URL}`);
 }
 function unreadCountForRole(role){
   return state.notifications.filter(n => n.toRole === role && !n.read).length;
