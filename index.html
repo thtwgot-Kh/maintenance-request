@@ -275,6 +275,7 @@ const emptyForm = () => ({ dept:'', machineCode:'', machineSearch:'', machineNam
 let state = {
   role: null,
   allowedRoles: [],
+  myTechName: '',
   lineUserId: null,
   authStatus: 'loading', // loading | denied | ok
   view: 'new',
@@ -309,8 +310,8 @@ async function getUserRoles(userId){
   try{
     const res = await fetch(API_URL + '?key=userRoles&userId=' + encodeURIComponent(userId));
     const data = await res.json();
-    return data.value ? JSON.parse(data.value) : [];
-  }catch(e){ return []; }
+    return data.value ? JSON.parse(data.value) : { roles:[], techName:'' };
+  }catch(e){ return { roles:[], techName:'' }; }
 }
 /* บทบาทถูกผูกกับ LINE userId ของผู้ใช้เสมอ — ต้องเปิดผ่าน LINE (หรือผ่านลิงก์ LIFF) และมีชื่ออยู่ใน
    ชีต "สิทธิ์ผู้ใช้ LINE" เท่านั้นถึงจะเข้าใช้งานได้ ผู้ใช้ที่ไม่มีสิทธิ์หรือเปิดนอก LINE จะถูกบล็อก */
@@ -325,10 +326,12 @@ async function authenticate(){
     state.authStatus = 'denied';
     return;
   }
-  const roles = await getUserRoles(state.lineUserId);
+  const result = await getUserRoles(state.lineUserId);
+  const roles = result.roles || [];
   if(!roles.length){ state.authStatus = 'denied'; return; }
   state.allowedRoles = roles;
   state.role = roles[0];
+  state.myTechName = result.techName || '';
   state.authStatus = 'ok';
 }
 async function storeSet(key, val){
@@ -894,13 +897,13 @@ function renderDetail(){
         <button class="btn btn-primary" onclick="assignTechnician('${o.id}')">มอบหมายงาน</button>
       </div>
     </div>`;
-  } else if(state.role==='tech' && o.status==='ASSIGNED'){
+  } else if(state.role==='tech' && o.status==='ASSIGNED' && assignedTechs(o).includes(state.myTechName)){
     actionBox = `
     <div class="action-box">
       <h4>งานถูกมอบหมายแล้ว — รอเริ่มดำเนินการ</h4>
       <div class="order-actions"><button class="btn btn-primary" onclick="startRepair('${o.id}')">▶ เริ่มดำเนินการซ่อม</button></div>
     </div>`;
-  } else if(state.role==='tech' && o.status==='IN_PROGRESS'){
+  } else if(state.role==='tech' && o.status==='IN_PROGRESS' && assignedTechs(o).includes(state.myTechName)){
     actionBox = `
     <div class="action-box">
       <h4>กำลังซ่อม</h4>
