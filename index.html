@@ -289,7 +289,7 @@ let state = {
   detailPhotos: [],
   filterStatus: 'ALL',
   filterDept: 'ALL',
-  ui: { rejectBoxFor:null, rejectReason:'', assignTechs:[''], newWebhookRole:'fm', newWebhookUrl:'' },
+  ui: { rejectBoxFor:null, rejectReason:'', assignTechs:[''], assignStartDate:'', assignEndDate:'', newWebhookRole:'fm', newWebhookUrl:'' },
 };
 
 /* ============================= STORAGE HELPERS (Google Sheets via Apps Script) ============================= */
@@ -493,7 +493,7 @@ async function submitOrder(){
     cause: f.cause.trim(), neededDate: f.neededDate, requestedBy: f.requestedBy.trim(),
     createdAt: nowIso(), status: 'PENDING_FM', photoCount: f.photos.length,
     approvals: { fm:{status:null,by:'',at:'',note:''}, gm:{status:null,by:'',at:'',note:''} },
-    assignment: { technicians:[], assignedBy:'', assignedAt:'' },
+    assignment: { technicians:[], assignedBy:'', assignedAt:'', startDate:'', endDate:'' },
     statusHistory: [{ status:'PENDING_FM', at: nowIso(), note:'สร้างใบแจ้งซ่อม โดย ' + f.requestedBy.trim() }],
   };
   state.orders.unshift(order);
@@ -584,16 +584,22 @@ function setAssignTech(i, v){ state.ui.assignTechs[i] = v; }
 async function assignTechnician(id){
   const o = getOrder(id); if(!o) return;
   const techs = [...new Set(state.ui.assignTechs.filter(Boolean))];
+  const startDate = state.ui.assignStartDate;
+  const endDate = state.ui.assignEndDate;
+  if(!startDate || !endDate){ toast('กรุณากำหนดวันเริ่มงานและวันที่คาดว่าจะเสร็จก่อนมอบหมายงาน', true); return; }
+  if(endDate < startDate){ toast('วันที่คาดว่าจะเสร็จต้องไม่ก่อนวันเริ่มงาน', true); return; }
   if(!techs.length){ toast('กรุณาเลือกชื่อช่างผู้รับผิดชอบอย่างน้อย 1 คน', true); return; }
-  o.assignment = { technicians: techs, assignedBy: ROLES.maint.label, assignedAt: nowIso() };
+  o.assignment = { technicians: techs, assignedBy: ROLES.maint.label, assignedAt: nowIso(), startDate, endDate };
   o.status = 'ASSIGNED';
-  o.statusHistory.push({ status:'ASSIGNED', at: nowIso(), note:'มอบหมายงานให้ ' + techs.join(', ') });
+  o.statusHistory.push({ status:'ASSIGNED', at: nowIso(), note:`มอบหมายงานให้ ${techs.join(', ')} (กำหนดงาน ${fmtDate(startDate)} - ${fmtDate(endDate)})` });
   await persistOrders();
   await pushNotification('requester', id, o.docNumber, `งานซ่อมของท่านถูกมอบหมายให้ ${techs.join(', ')} แล้ว สถานะ: รอดำเนินการ`);
   for(const tech of techs){
-    await tryLineWebhook(tech, `[${o.docNumber}] คุณได้รับมอบหมายงานซ่อม\nแผนก: ${o.department}\nเครื่องจักร: ${o.machineCode} — ${o.machineName}\nอาการ/รายละเอียด: ${o.cause}\nต้องการใช้งานภายใน: ${fmtDate(o.neededDate)}\n${APP_URL}`);
+    await tryLineWebhook(tech, `[${o.docNumber}] คุณได้รับมอบหมายงานซ่อม\nแผนก: ${o.department}\nเครื่องจักร: ${o.machineCode} — ${o.machineName}\nอาการ/รายละเอียด: ${o.cause}\nกำหนดงาน: ${fmtDate(startDate)} - ${fmtDate(endDate)}\n${APP_URL}`);
   }
   state.ui.assignTechs = [''];
+  state.ui.assignStartDate = '';
+  state.ui.assignEndDate = '';
   toast('มอบหมายงานเรียบร้อย');
   render();
 }
@@ -872,19 +878,29 @@ function renderDetail(){
     actionBox = `
     <div class="action-box">
       <h4>มอบหมายช่างผู้รับผิดชอบ</h4>
+      <div class="grid-2" style="margin-bottom:10px;">
+        <div class="field" style="margin-bottom:0;">
+          <label class="field-label">วันที่เริ่มงาน <span class="req-star">*</span></label>
+          <input type="date" class="input" value="${state.ui.assignStartDate}" onchange="state.ui.assignStartDate=this.value">
+        </div>
+        <div class="field" style="margin-bottom:0;">
+          <label class="field-label">วันที่คาดว่าจะเสร็จ <span class="req-star">*</span></label>
+          <input type="date" class="input" value="${state.ui.assignEndDate}" onchange="state.ui.assignEndDate=this.value">
+        </div>
+      </div>
       ${rows}
       <button class="btn btn-outline btn-sm" onclick="addAssignTechRow()">+ เพิ่มช่าง</button>
       <div class="order-actions" style="margin-top:10px;">
         <button class="btn btn-primary" onclick="assignTechnician('${o.id}')">มอบหมายงาน</button>
       </div>
     </div>`;
-  } else if(state.role==='maint' && o.status==='ASSIGNED'){
+  } else if(state.role==='tech' && o.status==='ASSIGNED'){
     actionBox = `
     <div class="action-box">
       <h4>งานถูกมอบหมายแล้ว — รอเริ่มดำเนินการ</h4>
       <div class="order-actions"><button class="btn btn-primary" onclick="startRepair('${o.id}')">▶ เริ่มดำเนินการซ่อม</button></div>
     </div>`;
-  } else if(state.role==='maint' && o.status==='IN_PROGRESS'){
+  } else if(state.role==='tech' && o.status==='IN_PROGRESS'){
     actionBox = `
     <div class="action-box">
       <h4>กำลังซ่อม</h4>
@@ -909,6 +925,8 @@ function renderDetail(){
       <div class="kv"><div class="k">วันที่ต้องการใช้งาน</div><div class="v">${fmtDate(o.neededDate)}</div></div>
       <div class="kv"><div class="k">แจ้งเมื่อ</div><div class="v">${fmtDateTime(o.createdAt)}</div></div>
       <div class="kv"><div class="k">ช่างผู้รับผิดชอบ</div><div class="v">${assignedTechs(o).length ? assignedTechs(o).map(escapeHtml).join(', ') : '—'}</div></div>
+      ${o.assignment.startDate ? `<div class="kv"><div class="k">วันที่เริ่มงาน</div><div class="v">${fmtDate(o.assignment.startDate)}</div></div>` : ''}
+      ${o.assignment.endDate ? `<div class="kv"><div class="k">วันที่คาดว่าจะเสร็จ</div><div class="v">${fmtDate(o.assignment.endDate)}</div></div>` : ''}
     </div>
     <div class="kv"><div class="k">อาการ / สาเหตุ</div><div class="v">${escapeHtml(o.cause)}</div></div>
     ${gallery}

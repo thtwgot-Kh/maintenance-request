@@ -240,7 +240,23 @@ in git.
   hold in `สิทธิ์ผู้ใช้ LINE` to log into the app themselves (distinct from
   the per-name LINE push routing above, which is what makes an
   *assignment* notification personal). `tech` was also added to the
-  Settings → LINE Webhook role list. No view/permissions are currently
-  gated on `role==='tech'` yet — only `maint` can assign/start/finish
-  repairs today; deciding whether technicians should get their own
-  view of assigned jobs is still open.
+  Settings → LINE Webhook role list.
+- **Assigning a job now requires a planned start date and end date**
+  (`assignment.startDate`/`.endDate`, two `<input type="date">` fields on
+  the `PENDING_ASSIGN` assign screen) — `assignTechnician()` in
+  `index.html` refuses to save (`toast(..., true)`) if either is blank, or
+  if the end date is before the start date. Both dates are shown on the
+  order detail page once assigned, and included in the per-technician
+  personal LINE ping.
+- **Starting/finishing a repair (`ASSIGNED`→`IN_PROGRESS`→`DONE`) is now
+  gated on `role==='tech'` instead of `role==='maint'`** — `maint` only
+  approves and assigns now; the technician side does the rest. **Caveat:**
+  this check is role-level only, not per-individual — any LINE account
+  logged in with the `tech` role can start/finish *any* assigned order,
+  not just the one(s) they were personally assigned to. There is currently
+  no data link between a `tech`-role LINE login and which name in
+  `config.technicians`/the **ช่าง** tab that person actually is (the
+  `สิทธิ์ผู้ใช้ LINE` tab only has columns `userId | บทบาท`, no name column)
+  — building true per-technician restriction would need that link added
+  (e.g. a third column in `สิทธิ์ผู้ใช้ LINE`, plus an Apps Script change to
+  `getUserRoles` to return it) and is still open.
