@@ -620,9 +620,14 @@ async function resetAllData(){
 /* ============================= RENDER: HEADER / NAV ============================= */
 function setRole(r){
   if(!state.allowedRoles.includes(r)) return;
-  state.role = r; state.ui.rejectBoxFor=null; render();
+  state.role = r; state.ui.rejectBoxFor=null;
+  if(state.view==='settings' && state.role!=='admin') state.view='list';
+  render();
 }
-function setView(v){ state.view = v; render(); }
+function setView(v){
+  if(v==='settings' && state.role!=='admin') return;
+  state.view = v; render();
+}
 
 function renderHeader(){
   const roleUi = state.allowedRoles.length > 1
@@ -646,7 +651,7 @@ function renderHeader(){
     <button class="${state.view==='new'?'active':''}" onclick="setView('new')">➕ แจ้งซ่อมใหม่</button>
     <button class="${state.view==='list'||state.view==='detail'?'active':''}" onclick="setView('list')">📋 รายการแจ้งซ่อม</button>
     <button class="${state.view==='notif'?'active':''}" onclick="setView('notif')">🔔 การแจ้งเตือน${unreadCountForRole(state.role)>0?`<span class="badge">${unreadCountForRole(state.role)}</span>`:''}</button>
-    <button class="${state.view==='settings'?'active':''}" onclick="setView('settings')">⚙️ ตั้งค่าข้อมูลหลัก</button>
+    ${state.role==='admin' ? `<button class="${state.view==='settings'?'active':''}" onclick="setView('settings')">⚙️ ตั้งค่าข้อมูลหลัก</button>` : ''}
   </nav>`;
 }
 
@@ -990,7 +995,7 @@ function render(){
   else if(state.view==='list') body = renderList();
   else if(state.view==='detail') body = renderDetail();
   else if(state.view==='notif') body = renderNotif();
-  else if(state.view==='settings') body = renderSettings();
+  else if(state.view==='settings') body = state.role==='admin' ? renderSettings() : renderList();
   app.innerHTML = renderHeader() + `<main>${body}</main>`;
 
   if(fid){
