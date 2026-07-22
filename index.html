@@ -177,7 +177,7 @@
   .gallery img{width:100px; height:100px; object-fit:cover; border-radius:7px; border:1px solid var(--line); cursor:pointer;}
   .action-box{background:var(--paper); border:1px solid var(--line); border-radius:9px; padding:16px; margin-top:16px;}
   .action-box h4{margin:0 0 10px; font-size:14px; color:var(--navy);}
-  .reject-box{margin-top:10px; background:#fff; border:1px solid var(--danger); border-radius:7px; padding:12px;}
+  .reject-box{margin-top:10px; background:#fff; border:1px solid var(--line); border-radius:7px; padding:12px;}
 
   /* notifications */
   .notif-item{display:flex; gap:12px; padding:13px 14px; border-radius:8px; margin-bottom:8px; background:#fff; border:1px solid #ece6d8;}
@@ -245,6 +245,8 @@ const ROLES = {
 const STATUS_META = {
   PENDING_FM:    { label:'รออนุมัติ (ผจก.โรงงาน)', color:'#c17f1e', bg:'#fbf0dd' },
   PENDING_GM:    { label:'รออนุมัติ (ผจก.ทั่วไป)',  color:'#c17f1e', bg:'#fbf0dd' },
+  NEEDS_INFO_FM: { label:'ต้องการข้อมูลเพิ่มเติม (ผจก.โรงงาน)', color:'#6b4fa0', bg:'#f1ecf8' },
+  NEEDS_INFO_GM: { label:'ต้องการข้อมูลเพิ่มเติม (ผจก.ทั่วไป)', color:'#6b4fa0', bg:'#f1ecf8' },
   PENDING_ASSIGN:{ label:'รอมอบหมายช่าง',           color:'#2a6f97', bg:'#e4f0f7' },
   ASSIGNED:      { label:'รอดำเนินการ',             color:'#6b7785', bg:'#eef0f2' },
   IN_PROGRESS:   { label:'กำลังซ่อม',               color:'#1F2C3B', bg:'#e6ecf1' },
@@ -291,11 +293,11 @@ let state = {
   detailPhotos: [],
   filterStatus: 'ALL',
   filterDept: 'ALL',
-  ui: { rejectBoxFor:null, rejectReason:'', assignTechs:[''], assignStartDate:'', assignEndDate:'', newWebhookRole:'fm', newWebhookUrl:'' },
+  ui: { actionFor:null, actionType:null, actionNote:'', assignTechs:[''], assignStartDate:'', assignEndDate:'', newWebhookRole:'fm', newWebhookUrl:'' },
 };
 
 /* ============================= STORAGE HELPERS (Google Sheets via Apps Script) ============================= */
-const API_URL = 'https://script.google.com/macros/s/AKfycbwPcX0_KDOBI9NG1oNz6c9LD4pCOQKA_HuHvneczyKpnnVIv5mi6k8wx7M_Xiowe0ya0w/exec';
+const API_URL = 'https://script.google.com/macros/s/AKfycbwAonfxwJZrsR2ZaYmew0R6akvZFm84j4u2fwEkno7r7YJg-kYykXrz_cwT4uNcB-l9Ng/exec';
 const SHEET_URL = 'https://docs.google.com/spreadsheets/d/1er3WPCHJmV8_lioD-9gShr5mWDaajvXEYrEaaV-_p-k/edit';
 const APP_URL = 'https://thtwgot-kh.github.io/maintenance-request/';
 const LIFF_ID = '2010789633-I8KJNM4H';
@@ -526,7 +528,7 @@ function filteredMachines(){
 async function openDetail(id){
   state.selectedOrderId = id;
   state.view = 'detail';
-  state.ui.rejectBoxFor = null; state.ui.rejectReason='';
+  state.ui.actionFor = null; state.ui.actionType = null; state.ui.actionNote='';
   const photos = await storeGet('photos:'+id);
   state.detailPhotos = photos || [];
   // mark related notifications read for current role
@@ -540,49 +542,104 @@ function getOrder(id){ return state.orders.find(o => o.id === id); }
 
 async function persistOrders(){ await storeSet('orders', state.orders); }
 
-async function approveFm(id){
+function openActionBox(id, type){
+  state.ui.actionFor = id; state.ui.actionType = type; state.ui.actionNote = '';
+  render();
+}
+function closeActionBox(){
+  state.ui.actionFor = null; state.ui.actionType = null; state.ui.actionNote = '';
+  render();
+}
+function confirmAction(id){
+  const type = state.ui.actionType;
+  const note = state.ui.actionNote.trim();
+  if(type !== 'approve' && !note){ toast('กรุณาระบุหมายเหตุ', true); return; }
+  if(state.role === 'fm'){
+    if(type==='approve') approveFm(id, note);
+    else if(type==='reject') rejectFm(id, note);
+    else if(type==='needinfo') needInfoFm(id, note);
+  } else if(state.role === 'gm'){
+    if(type==='approve') approveGm(id, note);
+    else if(type==='reject') rejectGm(id, note);
+    else if(type==='needinfo') needInfoGm(id, note);
+  } else if(state.role === 'requester' && type === 'resubmit'){
+    resubmitInfo(id, note);
+  }
+}
+async function approveFm(id, note){
   const o = getOrder(id); if(!o) return;
-  o.approvals.fm = { status:'approved', by: ROLES.fm.label, at: nowIso(), note:'' };
+  const n = (note||'').trim();
+  o.approvals.fm = { status:'approved', by: ROLES.fm.label, at: nowIso(), note: n };
   o.status = 'PENDING_GM';
-  o.statusHistory.push({ status:'PENDING_GM', at: nowIso(), note:'ผู้จัดการโรงงานอนุมัติแล้ว' });
+  o.statusHistory.push({ status:'PENDING_GM', at: nowIso(), note:'ผู้จัดการโรงงานอนุมัติแล้ว' + (n ? ' — หมายเหตุ: ' + n : '') });
   await persistOrders();
   await pushNotification('gm', id, o.docNumber, `ใบแจ้งซ่อมแผนก ${o.department} ผ่านการอนุมัติของผู้จัดการโรงงานแล้ว รอการอนุมัติของท่าน`);
   toast('อนุมัติแล้ว ส่งต่อให้ผู้จัดการทั่วไป');
-  render();
+  closeActionBox();
 }
-async function rejectFm(id){
+async function rejectFm(id, note){
   const o = getOrder(id); if(!o) return;
-  const reason = state.ui.rejectReason.trim() || 'ไม่ระบุเหตุผล';
+  const reason = (note||'').trim() || 'ไม่ระบุเหตุผล';
   o.approvals.fm = { status:'rejected', by: ROLES.fm.label, at: nowIso(), note: reason };
   o.status = 'REJECTED';
   o.statusHistory.push({ status:'REJECTED', at: nowIso(), note:'ผู้จัดการโรงงานไม่อนุมัติ: ' + reason });
   await persistOrders();
   await pushNotification('requester', id, o.docNumber, `ใบแจ้งซ่อมของท่านไม่ได้รับการอนุมัติจากผู้จัดการโรงงาน (${reason})`);
   toast('บันทึกการไม่อนุมัติแล้ว');
-  state.ui.rejectBoxFor=null; state.ui.rejectReason='';
-  render();
+  closeActionBox();
 }
-async function approveGm(id){
+async function needInfoFm(id, note){
   const o = getOrder(id); if(!o) return;
-  o.approvals.gm = { status:'approved', by: ROLES.gm.label, at: nowIso(), note:'' };
+  const msg = (note||'').trim();
+  o.status = 'NEEDS_INFO_FM';
+  o.statusHistory.push({ status:'NEEDS_INFO_FM', at: nowIso(), note:'ผู้จัดการโรงงานขอข้อมูลเพิ่มเติม: ' + msg });
+  await persistOrders();
+  await pushNotification('requester', id, o.docNumber, `ผู้จัดการโรงงานต้องการข้อมูลเพิ่มเติมสำหรับใบแจ้งซ่อมของท่าน: ${msg}`);
+  toast('ส่งคำขอข้อมูลเพิ่มเติมแล้ว');
+  closeActionBox();
+}
+async function approveGm(id, note){
+  const o = getOrder(id); if(!o) return;
+  const n = (note||'').trim();
+  o.approvals.gm = { status:'approved', by: ROLES.gm.label, at: nowIso(), note: n };
   o.status = 'PENDING_ASSIGN';
-  o.statusHistory.push({ status:'PENDING_ASSIGN', at: nowIso(), note:'ผู้จัดการทั่วไปอนุมัติแล้ว' });
+  o.statusHistory.push({ status:'PENDING_ASSIGN', at: nowIso(), note:'ผู้จัดการทั่วไปอนุมัติแล้ว' + (n ? ' — หมายเหตุ: ' + n : '') });
   await persistOrders();
   await pushNotification('maint', id, o.docNumber, `ใบแจ้งซ่อมแผนก ${o.department} ผ่านการอนุมัติครบแล้ว กรุณามอบหมายช่างผู้รับผิดชอบ`);
   toast('อนุมัติแล้ว ส่งต่อให้ผู้จัดการแผนกซ่อมบำรุง');
-  render();
+  closeActionBox();
 }
-async function rejectGm(id){
+async function rejectGm(id, note){
   const o = getOrder(id); if(!o) return;
-  const reason = state.ui.rejectReason.trim() || 'ไม่ระบุเหตุผล';
+  const reason = (note||'').trim() || 'ไม่ระบุเหตุผล';
   o.approvals.gm = { status:'rejected', by: ROLES.gm.label, at: nowIso(), note: reason };
   o.status = 'REJECTED';
   o.statusHistory.push({ status:'REJECTED', at: nowIso(), note:'ผู้จัดการทั่วไปไม่อนุมัติ: ' + reason });
   await persistOrders();
   await pushNotification('requester', id, o.docNumber, `ใบแจ้งซ่อมของท่านไม่ได้รับการอนุมัติจากผู้จัดการทั่วไป (${reason})`);
   toast('บันทึกการไม่อนุมัติแล้ว');
-  state.ui.rejectBoxFor=null; state.ui.rejectReason='';
-  render();
+  closeActionBox();
+}
+async function needInfoGm(id, note){
+  const o = getOrder(id); if(!o) return;
+  const msg = (note||'').trim();
+  o.status = 'NEEDS_INFO_GM';
+  o.statusHistory.push({ status:'NEEDS_INFO_GM', at: nowIso(), note:'ผู้จัดการทั่วไปขอข้อมูลเพิ่มเติม: ' + msg });
+  await persistOrders();
+  await pushNotification('requester', id, o.docNumber, `ผู้จัดการทั่วไปต้องการข้อมูลเพิ่มเติมสำหรับใบแจ้งซ่อมของท่าน: ${msg}`);
+  toast('ส่งคำขอข้อมูลเพิ่มเติมแล้ว');
+  closeActionBox();
+}
+async function resubmitInfo(id, note){
+  const o = getOrder(id); if(!o) return;
+  const msg = (note||'').trim();
+  const backTo = o.status === 'NEEDS_INFO_FM' ? 'PENDING_FM' : 'PENDING_GM';
+  o.status = backTo;
+  o.statusHistory.push({ status: backTo, at: nowIso(), note:'ผู้แจ้งซ่อมส่งข้อมูลเพิ่มเติม: ' + msg });
+  await persistOrders();
+  await pushNotification(backTo==='PENDING_FM' ? 'fm' : 'gm', id, o.docNumber, `ผู้แจ้งซ่อมส่งข้อมูลเพิ่มเติมสำหรับใบแจ้งซ่อมแผนก ${o.department} แล้ว กรุณาตรวจสอบอีกครั้ง`);
+  toast('ส่งข้อมูลเพิ่มเติมแล้ว รอการอนุมัติอีกครั้ง');
+  closeActionBox();
 }
 function addAssignTechRow(){ state.ui.assignTechs.push(''); render(); }
 function removeAssignTechRow(i){ state.ui.assignTechs.splice(i,1); render(); }
@@ -675,7 +732,7 @@ function currentRoleValue(){
 function setRole(value){
   const [key, idxStr] = String(value).split('|');
   if(!state.allowedRoles.includes(key)) return;
-  state.role = key; state.ui.rejectBoxFor=null;
+  state.role = key; state.ui.actionFor=null; state.ui.actionType=null; state.ui.actionNote='';
   if(key === 'tech'){
     state.myTechName = state.techIdentities[parseInt(idxStr, 10) || 0] || '';
   }
@@ -866,43 +923,53 @@ function renderDetail(){
 
   // action box depending on role + status
   let actionBox = '';
-  const rejectingThis = state.ui.rejectBoxFor === o.id;
+  const actionBoxOpen = state.ui.actionFor === o.id;
+  const actionType = state.ui.actionType;
+  const NOTE_LABELS = { approve:'หมายเหตุ (ถ้ามี)', reject:'เหตุผลที่ไม่อนุมัติ', needinfo:'ระบุข้อมูลที่ต้องการเพิ่มเติม', resubmit:'ข้อมูลเพิ่มเติม' };
+  const CONFIRM_LABELS = { approve:'ยืนยันอนุมัติ', reject:'ยืนยันไม่อนุมัติ', needinfo:'ส่งคำขอข้อมูลเพิ่มเติม', resubmit:'ส่งข้อมูล' };
+  function noteBox(){
+    if(!actionBoxOpen) return '';
+    return `
+      <div class="reject-box">
+        <label class="field-label">${NOTE_LABELS[actionType]}</label>
+        <textarea class="input" data-fid="actionNote" oninput="state.ui.actionNote=this.value" placeholder="ระบุหมายเหตุ...">${escapeHtml(state.ui.actionNote)}</textarea>
+        <div class="order-actions">
+          <button class="btn ${actionType==='reject'?'btn-danger-outline':'btn-primary'} btn-sm" onclick="confirmAction('${o.id}')">${CONFIRM_LABELS[actionType]}</button>
+          <button class="btn btn-outline btn-sm" onclick="closeActionBox();">ยกเลิก</button>
+        </div>
+      </div>`;
+  }
 
   if(state.role==='fm' && o.status==='PENDING_FM'){
     actionBox = `
     <div class="action-box">
       <h4>รออนุมัติจากผู้จัดการโรงงาน</h4>
       <div class="order-actions">
-        <button class="btn btn-success" onclick="approveFm('${o.id}')">✓ อนุมัติ</button>
-        <button class="btn btn-danger-outline" onclick="state.ui.rejectBoxFor='${o.id}'; render();">✕ ไม่อนุมัติ</button>
+        <button class="btn btn-success" onclick="openActionBox('${o.id}','approve')">✓ อนุมัติ</button>
+        <button class="btn btn-outline" onclick="openActionBox('${o.id}','needinfo')">❓ ต้องการข้อมูลเพิ่มเติม</button>
+        <button class="btn btn-danger-outline" onclick="openActionBox('${o.id}','reject')">✕ ไม่อนุมัติ</button>
       </div>
-      ${rejectingThis ? `
-      <div class="reject-box">
-        <label class="field-label">เหตุผลที่ไม่อนุมัติ</label>
-        <textarea class="input" data-fid="rejectReason" oninput="state.ui.rejectReason=this.value" placeholder="ระบุเหตุผล..."></textarea>
-        <div class="order-actions">
-          <button class="btn btn-danger-outline btn-sm" onclick="rejectFm('${o.id}')">ยืนยันไม่อนุมัติ</button>
-          <button class="btn btn-outline btn-sm" onclick="state.ui.rejectBoxFor=null; render();">ยกเลิก</button>
-        </div>
-      </div>` : ''}
+      ${noteBox()}
     </div>`;
   } else if(state.role==='gm' && o.status==='PENDING_GM'){
     actionBox = `
     <div class="action-box">
       <h4>รออนุมัติจากผู้จัดการทั่วไป</h4>
       <div class="order-actions">
-        <button class="btn btn-success" onclick="approveGm('${o.id}')">✓ อนุมัติ</button>
-        <button class="btn btn-danger-outline" onclick="state.ui.rejectBoxFor='${o.id}'; render();">✕ ไม่อนุมัติ</button>
+        <button class="btn btn-success" onclick="openActionBox('${o.id}','approve')">✓ อนุมัติ</button>
+        <button class="btn btn-outline" onclick="openActionBox('${o.id}','needinfo')">❓ ต้องการข้อมูลเพิ่มเติม</button>
+        <button class="btn btn-danger-outline" onclick="openActionBox('${o.id}','reject')">✕ ไม่อนุมัติ</button>
       </div>
-      ${rejectingThis ? `
-      <div class="reject-box">
-        <label class="field-label">เหตุผลที่ไม่อนุมัติ</label>
-        <textarea class="input" data-fid="rejectReason" oninput="state.ui.rejectReason=this.value" placeholder="ระบุเหตุผล..."></textarea>
-        <div class="order-actions">
-          <button class="btn btn-danger-outline btn-sm" onclick="rejectGm('${o.id}')">ยืนยันไม่อนุมัติ</button>
-          <button class="btn btn-outline btn-sm" onclick="state.ui.rejectBoxFor=null; render();">ยกเลิก</button>
-        </div>
-      </div>` : ''}
+      ${noteBox()}
+    </div>`;
+  } else if(state.role==='requester' && (o.status==='NEEDS_INFO_FM' || o.status==='NEEDS_INFO_GM')){
+    actionBox = `
+    <div class="action-box">
+      <h4>ต้องการข้อมูลเพิ่มเติมจากท่าน</h4>
+      <div class="order-actions">
+        <button class="btn btn-primary" onclick="openActionBox('${o.id}','resubmit')">📨 ส่งข้อมูลเพิ่มเติม</button>
+      </div>
+      ${noteBox()}
     </div>`;
   } else if(state.role==='maint' && o.status==='PENDING_ASSIGN'){
     const rows = state.ui.assignTechs.map((val, i) => `
