@@ -293,7 +293,7 @@ let state = {
   detailPhotos: [],
   filterStatus: 'ALL',
   filterDept: 'ALL',
-  ui: { actionFor:null, actionType:null, actionNote:'', assignTechs:[''], assignStartDate:'', assignEndDate:'', newWebhookRole:'fm', newWebhookUrl:'' },
+  ui: { actionFor:null, actionType:null, actionNote:'', resubmitPhotos:[], assignTechs:[''], assignStartDate:'', assignEndDate:'', newWebhookRole:'fm', newWebhookUrl:'' },
 };
 
 /* ============================= STORAGE HELPERS (Google Sheets via Apps Script) ============================= */
@@ -543,12 +543,28 @@ function getOrder(id){ return state.orders.find(o => o.id === id); }
 async function persistOrders(){ await storeSet('orders', state.orders); }
 
 function openActionBox(id, type){
-  state.ui.actionFor = id; state.ui.actionType = type; state.ui.actionNote = '';
+  state.ui.actionFor = id; state.ui.actionType = type; state.ui.actionNote = ''; state.ui.resubmitPhotos = [];
   render();
 }
 function closeActionBox(){
-  state.ui.actionFor = null; state.ui.actionType = null; state.ui.actionNote = '';
+  state.ui.actionFor = null; state.ui.actionType = null; state.ui.actionNote = ''; state.ui.resubmitPhotos = [];
   render();
+}
+async function handleResubmitPhotoInput(files){
+  const remaining = 5 - state.ui.resubmitPhotos.length;
+  if(remaining <= 0){ toast('แนบรูปได้สูงสุด 5 รูปต่อครั้ง', true); return; }
+  const list = Array.from(files).slice(0, remaining);
+  for(const f of list){
+    if(!f.type.startsWith('image/')) continue;
+    try{
+      const dataUrl = await resizeImageFile(f, 900);
+      state.ui.resubmitPhotos.push(dataUrl);
+    }catch(e){ console.error(e); }
+  }
+  render();
+}
+function removeResubmitPhoto(idx){
+  state.ui.resubmitPhotos.splice(idx,1); render();
 }
 function confirmAction(id){
   const type = state.ui.actionType;
@@ -633,9 +649,17 @@ async function needInfoGm(id, note){
 async function resubmitInfo(id, note){
   const o = getOrder(id); if(!o) return;
   const msg = (note||'').trim();
+  const newPhotos = state.ui.resubmitPhotos || [];
   const backTo = o.status === 'NEEDS_INFO_FM' ? 'PENDING_FM' : 'PENDING_GM';
   o.status = backTo;
-  o.statusHistory.push({ status: backTo, at: nowIso(), note:'ผู้แจ้งซ่อมส่งข้อมูลเพิ่มเติม: ' + msg });
+  o.statusHistory.push({ status: backTo, at: nowIso(), note:'ผู้แจ้งซ่อมส่งข้อมูลเพิ่มเติม: ' + msg + (newPhotos.length ? ` (แนบรูปเพิ่ม ${newPhotos.length} รูป)` : '') });
+  if(newPhotos.length){
+    const existing = (await storeGet('photos:'+id)) || [];
+    const merged = existing.concat(newPhotos);
+    await storeSet('photos:'+id, merged);
+    o.photoCount = merged.length;
+    if(state.selectedOrderId === id) state.detailPhotos = merged;
+  }
   await persistOrders();
   await pushNotification(backTo==='PENDING_FM' ? 'fm' : 'gm', id, o.docNumber, `ผู้แจ้งซ่อมส่งข้อมูลเพิ่มเติมสำหรับใบแจ้งซ่อมแผนก ${o.department} แล้ว กรุณาตรวจสอบอีกครั้ง`);
   toast('ส่งข้อมูลเพิ่มเติมแล้ว รอการอนุมัติอีกครั้ง');
@@ -929,10 +953,20 @@ function renderDetail(){
   const CONFIRM_LABELS = { approve:'ยืนยันอนุมัติ', reject:'ยืนยันไม่อนุมัติ', needinfo:'ส่งคำขอข้อมูลเพิ่มเติม', resubmit:'ส่งข้อมูล' };
   function noteBox(){
     if(!actionBoxOpen) return '';
+    const photoThumbs = state.ui.resubmitPhotos.map((p,i) => `
+      <div class="photo-thumb"><img src="${p}"><button class="rm" onclick="removeResubmitPhoto(${i})">✕</button></div>`).join('');
+    const photoSection = actionType === 'resubmit' ? `
+      <div class="field" style="margin-top:10px; margin-bottom:0;">
+        <label class="field-label">แนบรูปภาพประกอบเพิ่มเติม (สูงสุด 5 รูป)</label>
+        <label class="photo-drop" for="resubmitPhotoInput">📷 แตะเพื่อเลือกรูปภาพ หรือถ่ายภาพใหม่</label>
+        <input id="resubmitPhotoInput" type="file" accept="image/*" multiple style="display:none" onchange="handleResubmitPhotoInput(this.files)">
+        <div class="photo-thumbs">${photoThumbs}</div>
+      </div>` : '';
     return `
       <div class="reject-box">
         <label class="field-label">${NOTE_LABELS[actionType]}</label>
         <textarea class="input" data-fid="actionNote" oninput="state.ui.actionNote=this.value" placeholder="ระบุหมายเหตุ...">${escapeHtml(state.ui.actionNote)}</textarea>
+        ${photoSection}
         <div class="order-actions">
           <button class="btn ${actionType==='reject'?'btn-danger-outline':'btn-primary'} btn-sm" onclick="confirmAction('${o.id}')">${CONFIRM_LABELS[actionType]}</button>
           <button class="btn btn-outline btn-sm" onclick="closeActionBox();">ยกเลิก</button>
