@@ -149,6 +149,21 @@ Behavior:
   push API. **Falls back to broadcasting to every OA friend if no recipient
   is mapped for that role yet** — this is the current state for roles that
   haven't had a real person's `userId` assigned.
+  - `body.role` is not limited to the four app roles (fm/gm/maint/
+    requester) — `assignTechnician()` in `index.html` sends the assigned
+    technician's exact name (from the **ช่าง** tab / config.technicians) as
+    `role`, so a per-technician personal LINE ping goes out the moment a
+    job is assigned. To route that to the right person, add a row per
+    technician to `แจ้งเตือน LINE - ผู้รับ` with บทบาท = their exact name
+    string and userId = their LINE userId — same mechanism as the other
+    roles, no Apps Script changes needed. Until a technician has a row
+    there, their assignment ping falls back to the broadcast-to-everyone
+    behavior above.
+  - `tryLineWebhook(role, message)` in `index.html` no longer requires a
+    webhook URL configured under that exact `role` key in Settings — it
+    falls back to whichever webhook URL *is* configured (they're always the
+    same "LineOA MT" `/exec` URL in practice), so technician names never
+    need their own row in the Settings → LINE Webhook table.
 
 ## Git workflow used throughout this project
 
@@ -198,3 +213,8 @@ in git.
   fill in the `แจ้งเตือน LINE - ผู้รับ` tab mapping each role to a real
   `userId`. Until that mapping exists per role, notifications for that role
   broadcast to every OA friend instead of the intended person.
+- Technician assignment now also fires a personal LINE push (see
+  `assignTechnician()` in `index.html`, keyed by the technician's exact name
+  as `role`) — needs the same `แจ้งเตือน LINE - ผู้รับ` mapping filled in
+  per technician once each has messaged the OA and shown up in `LINE
+  Users`.

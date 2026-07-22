@@ -385,7 +385,8 @@ function toast(msg, isErr){
   setTimeout(()=>{ el.style.opacity='0'; el.style.transition='opacity .3s'; setTimeout(()=>el.remove(),300); }, 2600);
 }
 async function tryLineWebhook(role, message){
-  const url = state.config.lineWebhooks && state.config.lineWebhooks[role];
+  const hooks = state.config.lineWebhooks || {};
+  const url = hooks[role] || Object.values(hooks).find(Boolean);
   if(!url) return;
   try{
     await fetch(url, { method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'}, body: JSON.stringify({ role, message, at: nowIso() }) });
@@ -579,6 +580,7 @@ async function assignTechnician(id){
   o.statusHistory.push({ status:'ASSIGNED', at: nowIso(), note:'มอบหมายงานให้ ' + tech });
   await persistOrders();
   await pushNotification('requester', id, o.docNumber, `งานซ่อมของท่านถูกมอบหมายให้ ${tech} แล้ว สถานะ: รอดำเนินการ`);
+  await tryLineWebhook(tech, `[${o.docNumber}] คุณได้รับมอบหมายงานซ่อม\nแผนก: ${o.department}\nเครื่องจักร: ${o.machineCode} — ${o.machineName}\nอาการ/รายละเอียด: ${o.cause}\nต้องการใช้งานภายใน: ${fmtDate(o.neededDate)}\n${APP_URL}`);
   toast('มอบหมายงานเรียบร้อย');
   render();
 }
