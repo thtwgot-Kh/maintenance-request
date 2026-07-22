@@ -276,6 +276,7 @@ let state = {
   role: null,
   allowedRoles: [],
   myTechName: '',
+  techIdentities: [],
   lineUserId: null,
   authStatus: 'loading', // loading | denied | ok
   view: 'new',
@@ -310,8 +311,8 @@ async function getUserRoles(userId){
   try{
     const res = await fetch(API_URL + '?key=userRoles&userId=' + encodeURIComponent(userId));
     const data = await res.json();
-    return data.value ? JSON.parse(data.value) : { roles:[], techName:'' };
-  }catch(e){ return { roles:[], techName:'' }; }
+    return data.value ? JSON.parse(data.value) : { roles:[], techNames:[] };
+  }catch(e){ return { roles:[], techNames:[] }; }
 }
 /* บทบาทถูกผูกกับ LINE userId ของผู้ใช้เสมอ — ต้องเปิดผ่าน LINE (หรือผ่านลิงก์ LIFF) และมีชื่ออยู่ใน
    ชีต "สิทธิ์ผู้ใช้ LINE" เท่านั้นถึงจะเข้าใช้งานได้ ผู้ใช้ที่ไม่มีสิทธิ์หรือเปิดนอก LINE จะถูกบล็อก */
@@ -329,9 +330,11 @@ async function authenticate(){
   const result = await getUserRoles(state.lineUserId);
   const roles = result.roles || [];
   if(!roles.length){ state.authStatus = 'denied'; return; }
-  state.allowedRoles = roles;
+  state.allowedRoles = [...new Set(roles)];
   state.role = roles[0];
-  state.myTechName = result.techName || '';
+  // รองรับทั้งรูปแบบใหม่ (techNames: อาเรย์) และรูปแบบเก่า (techName: string เดี่ยว)
+  state.techIdentities = result.techNames || (result.techName ? [result.techName] : []);
+  state.myTechName = state.techIdentities[0] || '';
   state.authStatus = 'ok';
 }
 async function storeSet(key, val){
@@ -643,9 +646,39 @@ async function resetAllData(){
 }
 
 /* ============================= RENDER: HEADER / NAV ============================= */
-function setRole(r){
-  if(!state.allowedRoles.includes(r)) return;
-  state.role = r; state.ui.rejectBoxFor=null;
+// บทบาท "tech" หนึ่งบัญชี LINE อาจผูกกับชื่อช่างได้หลายคน (เช่น บัญชีทดสอบ) จึงต้องขยาย
+// รายการตัวเลือกให้เห็นชื่อช่างแต่ละคนแยกกัน ค่า option จึงเป็น "tech|<index>" สำหรับ tech
+// และเป็น role key เฉยๆ สำหรับบทบาทอื่น
+function roleOptionList(){
+  const opts = [];
+  state.allowedRoles.forEach(r => {
+    if(r === 'tech' && state.techIdentities.length > 1){
+      state.techIdentities.forEach((name, i) => {
+        opts.push({ value:`tech|${i}`, label:`${ROLES.tech.icon} ${ROLES.tech.label} — ${name}` });
+      });
+    } else if(r === 'tech'){
+      const name = state.techIdentities[0];
+      opts.push({ value:'tech|0', label:`${ROLES.tech.icon} ${ROLES.tech.label}` + (name ? ` — ${name}` : '') });
+    } else {
+      opts.push({ value:r, label:`${ROLES[r].icon} ${ROLES[r].label}` });
+    }
+  });
+  return opts;
+}
+function currentRoleValue(){
+  if(state.role === 'tech'){
+    const idx = state.techIdentities.indexOf(state.myTechName);
+    return `tech|${idx >= 0 ? idx : 0}`;
+  }
+  return state.role;
+}
+function setRole(value){
+  const [key, idxStr] = String(value).split('|');
+  if(!state.allowedRoles.includes(key)) return;
+  state.role = key; state.ui.rejectBoxFor=null;
+  if(key === 'tech'){
+    state.myTechName = state.techIdentities[parseInt(idxStr, 10) || 0] || '';
+  }
   if(state.view==='settings' && state.role!=='admin') state.view='list';
   render();
 }
@@ -655,9 +688,11 @@ function setView(v){
 }
 
 function renderHeader(){
-  const roleUi = state.allowedRoles.length > 1
-    ? `<select onchange="setRole(this.value)">${state.allowedRoles.map(k => `<option value="${k}" ${state.role===k?'selected':''}>${ROLES[k].icon} ${ROLES[k].label}</option>`).join('')}</select>`
-    : `<span class="mono">${ROLES[state.role].icon} ${ROLES[state.role].label}</span>`;
+  const roleOpts = roleOptionList();
+  const curVal = currentRoleValue();
+  const roleUi = roleOpts.length > 1
+    ? `<select onchange="setRole(this.value)">${roleOpts.map(o => `<option value="${o.value}" ${curVal===o.value?'selected':''}>${o.label}</option>`).join('')}</select>`
+    : `<span class="mono">${roleOpts[0] ? roleOpts[0].label : ''}</span>`;
   return `
   <header class="topbar">
     <div class="brand">
