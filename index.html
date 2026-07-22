@@ -179,6 +179,12 @@
   .action-box h4{margin:0 0 10px; font-size:14px; color:var(--navy);}
   .reject-box{margin-top:10px; background:#fff; border:1px solid var(--line); border-radius:7px; padding:12px;}
 
+  .update-banner{
+    background:var(--warn-bg); color:var(--warn); border-bottom:2px solid var(--warn);
+    padding:10px 20px; display:flex; align-items:center; justify-content:center; gap:12px;
+    font-size:13.5px; font-weight:600; flex-wrap:wrap; text-align:center;
+  }
+
   /* notifications */
   .notif-item{display:flex; gap:12px; padding:13px 14px; border-radius:8px; margin-bottom:8px; background:#fff; border:1px solid #ece6d8;}
   .notif-item.unread{background:#fffaf0; border-color:var(--amber);}
@@ -293,6 +299,7 @@ let state = {
   detailPhotos: [],
   filterStatus: 'ALL',
   filterDept: 'ALL',
+  updateAvailable: false,
   ui: { actionFor:null, actionType:null, actionNote:'', resubmitPhotos:[], assignTechs:[''], assignStartDate:'', assignEndDate:'', newWebhookRole:'fm', newWebhookUrl:'' },
 };
 
@@ -301,6 +308,9 @@ const API_URL = 'https://script.google.com/macros/s/AKfycbwAonfxwJZrsR2ZaYmew0R6
 const SHEET_URL = 'https://docs.google.com/spreadsheets/d/1er3WPCHJmV8_lioD-9gShr5mWDaajvXEYrEaaV-_p-k/edit';
 const APP_URL = 'https://thtwgot-kh.github.io/maintenance-request/';
 const LIFF_ID = '2010789633-I8KJNM4H';
+/* บั๊มเลขนี้ทุกครั้งที่แก้ไข index.html — ใช้เทียบกับไฟล์ล่าสุดบนเซิร์ฟเวอร์เพื่อเตือนแท็บที่เปิดค้าง
+   ไว้นานให้รีเฟรช ป้องกันปัญหาแท็บเก่ารันโค้ดที่ล้าสมัย (เช่น ลิงก์แจ้งเตือนที่ยังไม่มี deep link) */
+const APP_VERSION = '2026-07-22.1';
 
 async function storeGet(key){
   try{
@@ -1178,7 +1188,12 @@ function render(){
   else if(state.view==='detail') body = renderDetail();
   else if(state.view==='notif') body = renderNotif();
   else if(state.view==='settings') body = state.role==='admin' ? renderSettings() : renderList();
-  app.innerHTML = renderHeader() + `<main>${body}</main>`;
+  const updateBanner = state.updateAvailable ? `
+    <div class="update-banner">
+      🔄 มีการอัปเดตระบบเวอร์ชันใหม่ — กรุณารีเฟรชหน้าเพื่อใช้งานเวอร์ชันล่าสุด
+      <button class="btn btn-primary btn-sm" onclick="location.reload()">รีเฟรชตอนนี้</button>
+    </div>` : '';
+  app.innerHTML = updateBanner + renderHeader() + `<main>${body}</main>`;
 
   if(fid){
     const restored = app.querySelector(`[data-fid="${fid}"]`);
@@ -1205,6 +1220,22 @@ async function pollForUpdates(){
   }catch(e){ /* silent - next poll retries */ }
 }
 
+/* แท็บที่เปิดค้างไว้นานจะยังรันโค้ด JS เดิมในหน่วยความจำต่อไปเรื่อยๆ แม้ index.html บนเซิร์ฟเวอร์จะอัปเดตแล้ว
+   (เช่น ปุ่มกดต่างๆ จะยังส่งแจ้งเตือนแบบไม่มี deep link) จึงต้องดึงไฟล์ล่าสุดมาเทียบเวอร์ชันเป็นระยะ
+   แล้วเตือนให้ผู้ใช้รีเฟรชเอง แทนที่จะรีโหลดอัตโนมัติ (จะได้ไม่ขัดจังหวะระหว่างกรอกฟอร์ม) */
+async function checkForUpdate(){
+  if(state.updateAvailable) return;
+  try{
+    const res = await fetch(location.pathname + '?_v=' + Date.now(), { cache:'no-store' });
+    const text = await res.text();
+    const m = text.match(/const APP_VERSION\s*=\s*'([^']+)'/);
+    if(m && m[1] !== APP_VERSION){
+      state.updateAvailable = true;
+      render();
+    }
+  }catch(e){ /* ignore - next check retries */ }
+}
+
 /* ============================= INIT ============================= */
 /* รองรับลิงก์ลึกจากการแจ้งเตือน LINE: ?order=<id>&role=<role> เปิดตรงไปที่ใบแจ้งซ่อมนั้น
    และสลับบทบาทให้ตรงกับผู้รับแจ้งเตือน (ถ้าบัญชีนี้มีสิทธิ์บทบาทนั้นจริง) */
@@ -1228,6 +1259,7 @@ async function pollForUpdates(){
     render();
   }
   setInterval(pollForUpdates, 7000);
+  setInterval(checkForUpdate, 120000);
 })();
 </script>
 </body>
