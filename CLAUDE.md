@@ -105,17 +105,21 @@ Two-tier storage model:
     `dd/MM/yy[ HH:mm]` (matching the client's `fmtDate`/`fmtDateTime`) before
     being written — raw ISO strings in the Sheet are a past bug, not a
     format choice.
-- **`สิทธิ์ผู้ใช้ LINE` tab (columns: `userId | บทบาท | ชื่อช่าง`)** — controls
+- **`สิทธิ์ผู้ใช้ LINE` tab (columns: `userId | บทบาท | ชื่อ`)** — controls
   who can log into the app and which role(s) they see. One row per
   (userId, role) pair; a person with multiple roles gets multiple rows.
-  The 3rd column (`ชื่อช่าง`) is only meaningful on rows where บทบาท =
-  `tech` — it must exactly match a name in the **ช่าง** tab, and is what
-  lets the app know *which* technician a given `tech`-role LINE login is
-  (used to restrict start/finish-repair actions to only that person's own
-  assigned orders — see `assignedTechs(o).includes(state.myTechName)` in
-  `index.html`). `doGet('userRoles', ...)` returns `{ roles: [...],
-  techName: '...' }` (not a bare array) — `readUserRoles_()` in the Apps
-  Script reads all 3 columns.
+  The 3rd column (`ชื่อ`) is free-text on every row (handy for the admin to
+  see who's who at a glance) but the app only *reads* it on rows where
+  บทบาท = `tech` — there it must exactly match a name in the **ช่าง** tab,
+  since that's what lets the app know *which* technician a given
+  `tech`-role LINE login is (used to restrict start/finish-repair actions
+  to only that person's own assigned orders — see
+  `assignedTechs(o).includes(state.myTechName)` in `index.html`). On any
+  other role row the column is purely documentation and can hold whatever
+  name the admin wants — the app never looks at it. `doGet('userRoles',
+  ...)` returns `{ roles: [...], techName: '...' }` (not a bare array) —
+  `readUserRoles_()` in the Apps Script reads all 3 columns and only
+  populates `techName` from a `tech`-role row.
 - `resyncAll()` — run manually from the Apps Script editor (function
   dropdown → `resyncAll` → Run) any time the mirror-writing code changes, to
   re-apply formatting/dropdowns/colors to already-saved data. Editing the
@@ -264,7 +268,7 @@ in git.
   technicians** — `maint` only approves and assigns now; the technician
   side does the rest, and only for orders assigned to them personally
   (`assignedTechs(o).includes(state.myTechName)` in `index.html`).
-  `state.myTechName` comes from the `ชื่อช่าง` column of `สิทธิ์ผู้ใช้ LINE`
+  `state.myTechName` comes from the `ชื่อ` column of `สิทธิ์ผู้ใช้ LINE`
   (see above) via `doGet('userRoles', ...)`'s `techName` field — a `tech`
   account with no matching row there (or a name that doesn't exactly match
   the **ช่าง** tab) won't see the start/finish buttons on any order.
