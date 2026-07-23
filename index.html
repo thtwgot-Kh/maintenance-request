@@ -300,17 +300,17 @@ let state = {
   filterStatus: 'ALL',
   filterDept: 'ALL',
   updateAvailable: false,
-  ui: { actionFor:null, actionType:null, actionNote:'', resubmitPhotos:[], assignTechs:[''], assignStartDate:'', assignEndDate:'', newWebhookRole:'fm', newWebhookUrl:'' },
+  ui: { actionFor:null, actionType:null, actionNote:'', resubmitPhotos:[], assignTechs:[''], assignStartDate:'', assignEndDate:'', newWebhookRole:'fm', newWebhookUrl:'', resetConfirming:false, resetConfirmText:'' },
 };
 
 /* ============================= STORAGE HELPERS (Google Sheets via Apps Script) ============================= */
-const API_URL = 'https://script.google.com/macros/s/AKfycbw6XftTidicPMjQ0mEn3Wn9P6WmjW5xQLNCXRua_t-ogi3G3FoQDdGhgymnAdoM8daREA/exec';
+const API_URL = 'https://script.google.com/macros/s/AKfycbybZyb-_HCXKbl9IPYQAtWku9keveTxHN6otcrPK_cJCwDqhnGVeyU5G9VjPtIjHmJ8tQ/exec';
 const SHEET_URL = 'https://docs.google.com/spreadsheets/d/1er3WPCHJmV8_lioD-9gShr5mWDaajvXEYrEaaV-_p-k/edit';
 const APP_URL = 'https://thtwgot-kh.github.io/maintenance-request/';
 const LIFF_ID = '2010789633-I8KJNM4H';
 /* บั๊มเลขนี้ทุกครั้งที่แก้ไข index.html — ใช้เทียบกับไฟล์ล่าสุดบนเซิร์ฟเวอร์เพื่อเตือนแท็บที่เปิดค้าง
    ไว้นานให้รีเฟรช ป้องกันปัญหาแท็บเก่ารันโค้ดที่ล้าสมัย (เช่น ลิงก์แจ้งเตือนที่ยังไม่มี deep link) */
-const APP_VERSION = '2026-07-22.2';
+const APP_VERSION = '2026-07-23.1';
 
 async function storeGet(key){
   try{
@@ -730,6 +730,22 @@ async function saveWebhook(){
   await storeSet('config', state.config);
   toast('บันทึก Webhook สำหรับ ' + ROLES[role].label + ' แล้ว');
   render();
+}
+function openResetConfirm(){
+  state.ui.resetConfirming = true; state.ui.resetConfirmText = '';
+  render();
+}
+function cancelResetConfirm(){
+  state.ui.resetConfirming = false; state.ui.resetConfirmText = '';
+  render();
+}
+async function confirmResetAllData(){
+  if(state.ui.resetConfirmText.trim() !== 'ล้างข้อมูล'){
+    toast('กรุณาพิมพ์คำว่า "ล้างข้อมูล" ให้ตรงเพื่อยืนยัน', true);
+    return;
+  }
+  state.ui.resetConfirming = false; state.ui.resetConfirmText = '';
+  await resetAllData();
 }
 async function resetAllData(){
   state.counters = {}; state.orders = []; state.notifications = [];
@@ -1152,7 +1168,17 @@ function renderSettings(){
   <div class="settings-section card">
     <h3>รีเซ็ตข้อมูลระบบ</h3>
     <p class="desc">ล้างใบแจ้งซ่อม เลขที่เอกสาร และการแจ้งเตือนทั้งหมด (ไม่กระทบแผนก/เครื่องจักร/ช่างใน Sheet)</p>
-    <button class="btn btn-danger-outline btn-sm" onclick="resetAllData()">ล้างข้อมูลทั้งหมด</button>
+    ${state.ui.resetConfirming ? `
+    <div class="reject-box">
+      <p style="margin:0 0 10px; color:var(--danger); font-weight:600;">คำเตือน: จะลบใบแจ้งซ่อม การแจ้งเตือน และเลขที่เอกสารทั้งหมดอย่างถาวร ไม่สามารถย้อนกลับได้ และมีผลกับผู้ใช้งานทุกคนทันที</p>
+      <label class="field-label">พิมพ์คำว่า "ล้างข้อมูล" เพื่อยืนยัน</label>
+      <input class="input" data-fid="resetConfirmText" value="${escapeHtml(state.ui.resetConfirmText)}" oninput="state.ui.resetConfirmText=this.value" placeholder="ล้างข้อมูล">
+      <div class="order-actions" style="margin-top:10px;">
+        <button class="btn btn-danger-outline btn-sm" onclick="confirmResetAllData()">ยืนยันล้างข้อมูลทั้งหมด</button>
+        <button class="btn btn-outline btn-sm" onclick="cancelResetConfirm()">ยกเลิก</button>
+      </div>
+    </div>` : `
+    <button class="btn btn-danger-outline btn-sm" onclick="openResetConfirm()">ล้างข้อมูลทั้งหมด</button>`}
   </div>
   `;
 }
