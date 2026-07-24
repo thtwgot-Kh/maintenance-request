@@ -310,7 +310,7 @@ const APP_URL = 'https://thtwgot-kh.github.io/maintenance-request/';
 const LIFF_ID = '2010789633-I8KJNM4H';
 /* บั๊มเลขนี้ทุกครั้งที่แก้ไข index.html — ใช้เทียบกับไฟล์ล่าสุดบนเซิร์ฟเวอร์เพื่อเตือนแท็บที่เปิดค้าง
    ไว้นานให้รีเฟรช ป้องกันปัญหาแท็บเก่ารันโค้ดที่ล้าสมัย (เช่น ลิงก์แจ้งเตือนที่ยังไม่มี deep link) */
-const APP_VERSION = '2026-07-24.4';
+const APP_VERSION = '2026-07-24.5';
 
 async function storeGet(key){
   try{
@@ -394,10 +394,10 @@ function fmtDate(dstr){
 }
 function yyNow(){ return String(new Date().getFullYear() % 100).padStart(2,'0'); }
 function previewDocNumber(deptCode){
-  if(!deptCode) return '---/'+yyNow();
+  if(!deptCode) return 'xx---/'+yyNow();
   const yy = yyNow();
   const last = (state.counters[deptCode] && state.counters[deptCode][yy]) || 0;
-  return String(last+1).padStart(3,'0') + '/' + yy;
+  return deptCode + String(last+1).padStart(3,'0') + '/' + yy;
 }
 function escapeHtml(s){
   return String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -506,7 +506,7 @@ async function submitOrder(){
   const next = (deptCounters[yy] || 0) + 1;
   deptCounters[yy] = next;
   const newCounters = { ...counters, [f.dept]: deptCounters };
-  const docNumber = String(next).padStart(3,'0') + '/' + yy;
+  const docNumber = f.dept + String(next).padStart(3,'0') + '/' + yy;
 
   const id = uid();
   const order = {
