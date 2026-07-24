@@ -272,3 +272,34 @@ in git.
   (see above) via `doGet('userRoles', ...)`'s `techName` field — a `tech`
   account with no matching row there (or a name that doesn't exactly match
   the **ช่าง** tab) won't see the start/finish buttons on any order.
+- **The "new repair request" page/nav tab is now titled "ใบคำร้อง /
+  ใบแจ้งซ่อม"**, and the form has a new required "ประเภทเอกสาร" listbox
+  (1. ใบคำร้อง / 2. ใบแจ้งซ่อม) shown before the machine-code field, saved
+  as `order.docType` (`'request'` or `'repair'`) and shown as a small label
+  on the order list card and detail page (`DOC_TYPES` in `index.html`).
+- **`maint` (ผจก.แผนกซ่อมบำรุง) now records more of the paper work-order
+  form on assignment**: a required receiving-manager name
+  (`assignment.receivedByName`) and a required "การดำเนินงาน" execution
+  plan (`assignment.executionPlan`: `immediate`/`need_purchase`/
+  `use_existing`, see `EXECUTION_PLAN_META`). There's also a separate,
+  editable-any-time-after-assignment **"บันทึกข้อมูลซ่อมบำรุง"** record
+  (`order.maintRecord`: `causeAnalysis`, `inspectorOpinion` — see
+  `INSPECTOR_OPINION_META` — and a `parts[]` table of
+  name/qty/unit/price/shop/note) that `maint` fills in and every role can
+  view read-only once a job is assigned.
+- **Finishing a repair no longer closes the order directly.** `tech`
+  pressing "ซ่อมเสร็จสิ้น" now moves the order to a new status
+  `PENDING_VERIFY` ("รอผู้แจ้งตรวจสอบผลการซ่อม") instead of `DONE`. The
+  `requester` then sees a "ตรวจสอบผลการซ่อม" action box with two choices:
+  **ผ่าน** (moves to `DONE`, final) or **ไม่ผ่าน** (requires a reason —
+  "ระบุสาเหตุที่ต้องซ่อมเพิ่มเติม" — moves the order back to `ASSIGNED` so
+  the same technician(s) can re-open it via the normal start/finish flow).
+  Each fail round is recorded in `order.verificationHistory[]` and the
+  latest attempt in `order.verification` (`verifyRepair()` in
+  `index.html`); `maintRecord` stays editable across repeat rounds.
+  **This adds a new order status (`PENDING_VERIFY`) to the set the Apps
+  Script "คำร้องแจ้งซ่อม" mirror code (not in this repo) writes to the
+  ใบแจ้งซ่อม sheet tab's status data-validation dropdown + conditional
+  formatting — that dropdown/color list needs to be updated by hand to
+  include it, the same way the `technicians` field needed a manual mirror
+  update.**

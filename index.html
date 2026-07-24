@@ -256,8 +256,13 @@ const STATUS_META = {
   PENDING_ASSIGN:{ label:'รอมอบหมายช่าง',           color:'#2a6f97', bg:'#e4f0f7' },
   ASSIGNED:      { label:'รอดำเนินการ',             color:'#6b7785', bg:'#eef0f2' },
   IN_PROGRESS:   { label:'กำลังซ่อม',               color:'#1F2C3B', bg:'#e6ecf1' },
+  PENDING_VERIFY:{ label:'รอผู้แจ้งตรวจสอบผลการซ่อม', color:'#6b4fa0', bg:'#f1ecf8' },
   DONE:          { label:'ซ่อมเรียบร้อย',            color:'#2F8F6B', bg:'#e6f3ee' },
   REJECTED:      { label:'ไม่อนุมัติ',               color:'#B5433A', bg:'#fbeae8' },
+};
+const VERIFY_RESULT_META = {
+  pass: 'ผ่าน — ใช้งานได้ปกติ',
+  fail: 'ไม่ผ่าน — ต้องซ่อมเพิ่มเติม',
 };
 const DEPT_DEFAULT = [
   { code:'RB', name:'Rubber (RB)' },
@@ -323,7 +328,7 @@ const APP_URL = 'https://thtwgot-kh.github.io/maintenance-request/';
 const LIFF_ID = '2010789633-I8KJNM4H';
 /* บั๊มเลขนี้ทุกครั้งที่แก้ไข index.html — ใช้เทียบกับไฟล์ล่าสุดบนเซิร์ฟเวอร์เพื่อเตือนแท็บที่เปิดค้าง
    ไว้นานให้รีเฟรช ป้องกันปัญหาแท็บเก่ารันโค้ดที่ล้าสมัย (เช่น ลิงก์แจ้งเตือนที่ยังไม่มี deep link) */
-const APP_VERSION = '2026-07-24.6';
+const APP_VERSION = '2026-07-24.7';
 
 async function storeGet(key){
   try{
@@ -530,6 +535,8 @@ async function submitOrder(){
     approvals: { fm:{status:null,by:'',at:'',note:''}, gm:{status:null,by:'',at:'',note:''} },
     assignment: { technicians:[], assignedBy:'', assignedAt:'', startDate:'', endDate:'', executionPlan:'', receivedByName:'' },
     maintRecord: null,
+    verification: null,
+    verificationHistory: [],
     statusHistory: [{ status:'PENDING_FM', at: nowIso(), note:'สร้างใบแจ้งซ่อม โดย ' + f.requestedBy.trim() }],
   };
   const newOrders = [order, ...state.orders];
@@ -611,7 +618,7 @@ function removeResubmitPhoto(idx){
 function confirmAction(id){
   const type = state.ui.actionType;
   const note = state.ui.actionNote.trim();
-  if(type !== 'approve' && !note){ toast('กรุณาระบุหมายเหตุ', true); return; }
+  if(type !== 'approve' && type !== 'verify_pass' && !note){ toast('กรุณาระบุหมายเหตุ', true); return; }
   if(state.role === 'fm'){
     if(type==='approve') approveFm(id, note);
     else if(type==='reject') rejectFm(id, note);
@@ -622,6 +629,8 @@ function confirmAction(id){
     else if(type==='needinfo') needInfoGm(id, note);
   } else if(state.role === 'requester' && type === 'resubmit'){
     resubmitInfo(id, note);
+  } else if(state.role === 'requester' && (type === 'verify_pass' || type === 'verify_fail')){
+    verifyRepair(id, type, note);
   }
 }
 async function approveFm(id, note){
@@ -784,12 +793,40 @@ async function startRepair(id){
 }
 async function finishRepair(id){
   const o = getOrder(id); if(!o) return;
-  o.status = 'DONE';
-  o.statusHistory.push({ status:'DONE', at: nowIso(), note:'ซ่อมเรียบร้อย' });
+  o.status = 'PENDING_VERIFY';
+  o.statusHistory.push({ status:'PENDING_VERIFY', at: nowIso(), note:'ซ่อมเสร็จสิ้น รอผู้แจ้งซ่อมตรวจสอบการใช้งาน' });
   await persistOrders();
-  await pushNotification('requester', id, o.docNumber, `งานซ่อมของท่านเสร็จสิ้นแล้ว สถานะ: ซ่อมเรียบร้อย`);
-  toast('อัปเดตสถานะ: ซ่อมเรียบร้อย');
+  await pushNotification('requester', id, o.docNumber, `งานซ่อมของท่านเสร็จสิ้นแล้ว กรุณาตรวจสอบการใช้งานเครื่องจักร`);
+  toast('อัปเดตสถานะ: รอผู้แจ้งตรวจสอบผลการซ่อม');
   render();
+}
+
+/* ============================= REQUESTER VERIFICATION (ตรวจสอบผลการซ่อม) ============================= */
+async function verifyRepair(id, type, note){
+  const o = getOrder(id); if(!o) return;
+  const n = (note||'').trim();
+  if(type === 'verify_pass'){
+    o.status = 'DONE';
+    o.verification = { result:'pass', by:o.requestedBy, at: nowIso(), note:n };
+    o.statusHistory.push({ status:'DONE', at: nowIso(), note:'ผู้แจ้งซ่อมตรวจสอบแล้ว: ผ่าน ใช้งานได้ปกติ' + (n ? ' — หมายเหตุ: ' + n : '') });
+    await persistOrders();
+    await pushNotification('maint', id, o.docNumber, `ผู้แจ้งซ่อมตรวจสอบแล้ว งานซ่อมแผนก ${o.department} ผ่าน ปิดงานเรียบร้อย`);
+    toast('ยืนยันผลการซ่อมเรียบร้อย ปิดงาน');
+  } else {
+    if(!n){ toast('กรุณาระบุสาเหตุที่ต้องซ่อมเพิ่มเติม', true); return; }
+    o.status = 'ASSIGNED';
+    o.verification = { result:'fail', by:o.requestedBy, at: nowIso(), note:n };
+    o.verificationHistory = [...(o.verificationHistory||[]), o.verification];
+    o.statusHistory.push({ status:'ASSIGNED', at: nowIso(), note:'ผู้แจ้งซ่อมตรวจสอบแล้ว: ไม่ผ่าน ต้องซ่อมเพิ่มเติม เนื่องจาก ' + n });
+    await persistOrders();
+    const techs = assignedTechs(o);
+    await pushNotification('maint', id, o.docNumber, `ผู้แจ้งซ่อมตรวจสอบพบว่างานซ่อมแผนก ${o.department} ไม่ผ่าน ต้องซ่อมเพิ่มเติม เนื่องจาก ${n}`);
+    for(const tech of techs){
+      await tryLineWebhook(tech, `[${o.docNumber}] ผู้แจ้งซ่อมตรวจสอบพบว่างานซ่อมไม่ผ่าน ต้องดำเนินการซ่อมเพิ่มเติม\nสาเหตุ: ${n}\n${orderDeepLink(o.id, 'tech')}`);
+    }
+    toast('ส่งกลับเพื่อซ่อมเพิ่มเติมแล้ว');
+  }
+  closeActionBox();
 }
 
 /* ============================= SETTINGS ACTIONS ============================= */
@@ -1057,8 +1094,8 @@ function renderDetail(){
   let actionBox = '';
   const actionBoxOpen = state.ui.actionFor === o.id;
   const actionType = state.ui.actionType;
-  const NOTE_LABELS = { approve:'หมายเหตุ (ถ้ามี)', reject:'เหตุผลที่ไม่อนุมัติ', needinfo:'ระบุข้อมูลที่ต้องการเพิ่มเติม', resubmit:'ข้อมูลเพิ่มเติม' };
-  const CONFIRM_LABELS = { approve:'ยืนยันอนุมัติ', reject:'ยืนยันไม่อนุมัติ', needinfo:'ส่งคำขอข้อมูลเพิ่มเติม', resubmit:'ส่งข้อมูล' };
+  const NOTE_LABELS = { approve:'หมายเหตุ (ถ้ามี)', reject:'เหตุผลที่ไม่อนุมัติ', needinfo:'ระบุข้อมูลที่ต้องการเพิ่มเติม', resubmit:'ข้อมูลเพิ่มเติม', verify_pass:'หมายเหตุ (ถ้ามี)', verify_fail:'ระบุสาเหตุที่ต้องซ่อมเพิ่มเติม' };
+  const CONFIRM_LABELS = { approve:'ยืนยันอนุมัติ', reject:'ยืนยันไม่อนุมัติ', needinfo:'ส่งคำขอข้อมูลเพิ่มเติม', resubmit:'ส่งข้อมูล', verify_pass:'ยืนยันผ่านการตรวจสอบ', verify_fail:'ส่งกลับเพื่อซ่อมเพิ่มเติม' };
   function noteBox(){
     if(!actionBoxOpen) return '';
     const photoThumbs = state.ui.resubmitPhotos.map((p,i) => `
@@ -1076,7 +1113,7 @@ function renderDetail(){
         <textarea class="input" data-fid="actionNote" oninput="state.ui.actionNote=this.value" placeholder="ระบุหมายเหตุ...">${escapeHtml(state.ui.actionNote)}</textarea>
         ${photoSection}
         <div class="order-actions">
-          <button class="btn ${actionType==='reject'?'btn-danger-outline':'btn-primary'} btn-sm" onclick="confirmAction('${o.id}')">${CONFIRM_LABELS[actionType]}</button>
+          <button class="btn ${(actionType==='reject'||actionType==='verify_fail')?'btn-danger-outline':'btn-primary'} btn-sm" onclick="confirmAction('${o.id}')">${CONFIRM_LABELS[actionType]}</button>
           <button class="btn btn-outline btn-sm" onclick="closeActionBox();">ยกเลิก</button>
         </div>
       </div>`;
@@ -1110,6 +1147,17 @@ function renderDetail(){
       <h4>ต้องการข้อมูลเพิ่มเติมจากท่าน</h4>
       <div class="order-actions">
         <button class="btn btn-primary" onclick="openActionBox('${o.id}','resubmit')">📨 ส่งข้อมูลเพิ่มเติม</button>
+      </div>
+      ${noteBox()}
+    </div>`;
+  } else if(state.role==='requester' && o.status==='PENDING_VERIFY'){
+    actionBox = `
+    <div class="action-box">
+      <h4>ตรวจสอบผลการซ่อม</h4>
+      <p class="desc" style="margin:0 0 10px;">ช่างแจ้งว่าซ่อมเสร็จแล้ว กรุณาตรวจสอบการใช้งานเครื่องจักรจริง</p>
+      <div class="order-actions">
+        <button class="btn btn-success" onclick="openActionBox('${o.id}','verify_pass')">✓ ผ่าน (ใช้งานได้ปกติ)</button>
+        <button class="btn btn-danger-outline" onclick="openActionBox('${o.id}','verify_fail')">✕ ไม่ผ่าน (ต้องซ่อมเพิ่มเติม)</button>
       </div>
       ${noteBox()}
     </div>`;
@@ -1258,11 +1306,18 @@ function renderDetail(){
       ${o.assignment.startDate ? `<div class="kv"><div class="k">วันที่เริ่มงาน</div><div class="v">${fmtDate(o.assignment.startDate)}</div></div>` : ''}
       ${o.assignment.endDate ? `<div class="kv"><div class="k">กำหนดการดำเนินงานเสร็จสิ้น</div><div class="v">${fmtDate(o.assignment.endDate)}</div></div>` : ''}
       ${o.assignment.executionPlan ? `<div class="kv"><div class="k">การดำเนินงาน</div><div class="v">${EXECUTION_PLAN_META[o.assignment.executionPlan]}</div></div>` : ''}
+      ${o.verification ? `<div class="kv"><div class="k">ผลการตรวจสอบของผู้แจ้ง (ล่าสุด)</div><div class="v">${VERIFY_RESULT_META[o.verification.result]}${o.verification.note ? ' — ' + escapeHtml(o.verification.note) : ''}</div></div>` : ''}
     </div>
     <div class="kv"><div class="k">อาการ / สาเหตุ</div><div class="v">${escapeHtml(o.cause)}</div></div>
     ${gallery}
     ${actionBox}
     ${maintRecordSection}
+    ${o.verificationHistory && o.verificationHistory.length ? `
+    <div class="kv" style="margin-top:16px;"><div class="k">ประวัติการตรวจสอบของผู้แจ้ง (ครั้งที่ไม่ผ่าน)</div>
+      <div class="timeline">
+        ${o.verificationHistory.map(v => `<div class="timeline-item"><div>✕ ไม่ผ่าน — เนื่องจาก ${escapeHtml(v.note||'')}</div><div class="t-time">${fmtDateTime(v.at)}</div></div>`).join('')}
+      </div>
+    </div>` : ''}
     <div class="kv" style="margin-top:20px;"><div class="k">ลำดับเหตุการณ์</div><div class="timeline">${timeline}</div></div>
   </div>`;
 }
