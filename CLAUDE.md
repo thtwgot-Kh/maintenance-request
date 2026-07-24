@@ -90,12 +90,27 @@ Two-tier storage model:
   app picks it up within one poll cycle (~7s), no code involved.
 - **Orders/notifications remain app-owned, one-way mirrors:** the
   **ใบแจ้งซ่อม** (orders) and **การแจ้งเตือน** (notifications) tabs are
-  fully rewritten (`clearContents()` + re-append) every time the app saves
-  `orders`/`notifications`. This was a deliberate choice — the approval
-  workflow (who can approve, status transitions, timeline entries) lives in
-  client JS logic, so letting someone hand-edit a status cell in the Sheet
-  would desync it from reality. **Do not make these bidirectional** without
-  also moving the workflow logic server-side.
+  fully rewritten every time the app saves `orders`/`notifications`. This
+  was a deliberate choice — the approval workflow (who can approve, status
+  transitions, timeline entries) lives in client JS logic, so letting
+  someone hand-edit a status cell in the Sheet would desync it from
+  reality. **Do not make these bidirectional** without also moving the
+  workflow logic server-side.
+  - **The rewrite never touches the header row (row 1)** (script
+    `v4-2026-07-24`): `writeSheet_` clears/rewrites only rows 2+, and only
+    writes header values when row 1 is completely empty or still holds
+    Google Sheets **Table** default column names (`คอลัมน์ N` /
+    `Column N` — see `headersNeedRepair_`). This makes it safe to wrap
+    these tabs in a Sheets Table (ตาราง): before v4, the
+    whole-sheet `clearContents()` reset the Table's column names to
+    defaults on every single sync (i.e. every new order), which is exactly
+    the bug that prompted v4. Admin-typed custom header names now survive
+    syncs. (The `rebuildSheet_` error-fallback still deletes the whole
+    tab — a Table there is lost — but it only fires when a normal write
+    throws, and always leaves a row in **บันทึกข้อผิดพลาด**.)
+  - Rows are written oldest-first (sorted by `createdAt`, both tabs), so a
+    new order/notification visually appends at the bottom instead of
+    reshuffling everything from the top.
   - The **ใบแจ้งซ่อม** tab's "รหัสเครื่องจักร" column is a `HYPERLINK()`
     formula jumping to the matching row in the **เครื่องจักร** tab.
   - Status/approval columns (สถานะ, อนุมัติผจก.โรงงาน, อนุมัติผจก.ทั่วไป)
@@ -245,11 +260,10 @@ in git.
   `order.assignment.technician` (single string) → `order.assignment.technicians`
   (array of strings). `assignedTechs(o)` in `index.html` reads either shape
   so orders assigned before this change still display correctly.
-  **The Apps Script "คำร้องแจ้งซ่อม" mirror code (not in this repo) still
-  reads the old singular `technician` field for the "ช่างผู้รับผิดชอบ"
-  column in the ใบแจ้งซ่อม sheet tab — it needs to be updated by hand to
-  read `technicians` (joined with a comma), with a fallback to the old
-  `technician` field for historical rows.**
+  The Apps Script "คำร้องแจ้งซ่อม" mirror now also reads the
+  `technicians` array (joined with a comma) for the "ช่างผู้รับผิดชอบ"
+  column, falling back to the old singular `technician` field for
+  historical rows — done as of script `v3-2026-07-24`.
 - Added a dedicated `tech` app role (label "ช่าง") to `ROLES` in
   `index.html` — this is the role a technician's own LINE account would
   hold in `สิทธิ์ผู้ใช้ LINE` to log into the app themselves (distinct from
