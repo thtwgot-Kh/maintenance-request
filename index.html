@@ -304,13 +304,13 @@ let state = {
 };
 
 /* ============================= STORAGE HELPERS (Google Sheets via Apps Script) ============================= */
-const API_URL = 'https://script.google.com/macros/s/AKfycbzC1ZuoHL0IiX-u1NCUjVc5dmu76tyScfzyurSR5ckN1r0rk8h_QSp0Zs7g8CRLpEyjYA/exec';
+const API_URL = 'https://script.google.com/macros/s/AKfycbyJFozkOTsGdJGMjWfYAFT2riy_i94ap1dJKqK77QHintDQEcXPxAdv6140ZAaVPa5srA/exec';
 const SHEET_URL = 'https://docs.google.com/spreadsheets/d/1er3WPCHJmV8_lioD-9gShr5mWDaajvXEYrEaaV-_p-k/edit';
 const APP_URL = 'https://thtwgot-kh.github.io/maintenance-request/';
 const LIFF_ID = '2010789633-I8KJNM4H';
 /* บั๊มเลขนี้ทุกครั้งที่แก้ไข index.html — ใช้เทียบกับไฟล์ล่าสุดบนเซิร์ฟเวอร์เพื่อเตือนแท็บที่เปิดค้าง
    ไว้นานให้รีเฟรช ป้องกันปัญหาแท็บเก่ารันโค้ดที่ล้าสมัย (เช่น ลิงก์แจ้งเตือนที่ยังไม่มี deep link) */
-const APP_VERSION = '2026-07-24.3';
+const APP_VERSION = '2026-07-24.4';
 
 async function storeGet(key){
   try{
