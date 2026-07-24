@@ -277,8 +277,21 @@ const MACHINES_DEFAULT = [
   { code:'BG-02', name:'เครื่องบรรจุถุง 2', dept:'BG' },
 ];
 const TECH_DEFAULT = ['ช่างสมชาย (ไฟฟ้า)', 'ช่างวิชัย (เครื่องกล)', 'ช่างประเสริฐ (ทั่วไป)'];
+const DOC_TYPES = { request:'ใบคำร้อง', repair:'ใบแจ้งซ่อม' };
+const EXECUTION_PLAN_META = {
+  immediate:     'ดำเนินการได้ทันที',
+  need_purchase: 'ต้องการสั่งซื้ออุปกรณ์',
+  use_existing:  'ใช้อุปกรณ์ที่มีอยู่',
+};
+const INSPECTOR_OPINION_META = {
+  send_repair: 'ส่งซ่อม',
+  external:    'เรียกช่างภายนอกมาซ่อม',
+  self_repair: 'ซ่อมเอง',
+  buy_parts:   'ซื้ออุปกรณ์มาทำเอง',
+};
 
-const emptyForm = () => ({ dept:'', machineCode:'', machineSearch:'', machineName:'', cause:'', neededDate:'', requestedBy:'', photos:[] });
+const emptyForm = () => ({ dept:'', docType:'', machineCode:'', machineSearch:'', machineName:'', cause:'', neededDate:'', requestedBy:'', photos:[] });
+const emptyPartRow = () => ({ name:'', qty:'', unit:'', price:'', shop:'', note:'' });
 
 let state = {
   role: null,
@@ -300,7 +313,7 @@ let state = {
   filterStatus: 'ALL',
   filterDept: 'ALL',
   updateAvailable: false,
-  ui: { actionFor:null, actionType:null, actionNote:'', resubmitPhotos:[], assignTechs:[''], assignStartDate:'', assignEndDate:'', newWebhookRole:'fm', newWebhookUrl:'', resetConfirming:false, resetConfirmText:'' },
+  ui: { actionFor:null, actionType:null, actionNote:'', resubmitPhotos:[], assignTechs:[''], assignStartDate:'', assignEndDate:'', assignReceivedBy:'', assignExecutionPlan:'', maintRecordFor:null, maintRecordCause:'', maintRecordOpinion:'', maintRecordParts:[emptyPartRow()], newWebhookRole:'fm', newWebhookUrl:'', resetConfirming:false, resetConfirmText:'' },
 };
 
 /* ============================= STORAGE HELPERS (Google Sheets via Apps Script) ============================= */
@@ -310,7 +323,7 @@ const APP_URL = 'https://thtwgot-kh.github.io/maintenance-request/';
 const LIFF_ID = '2010789633-I8KJNM4H';
 /* บั๊มเลขนี้ทุกครั้งที่แก้ไข index.html — ใช้เทียบกับไฟล์ล่าสุดบนเซิร์ฟเวอร์เพื่อเตือนแท็บที่เปิดค้าง
    ไว้นานให้รีเฟรช ป้องกันปัญหาแท็บเก่ารันโค้ดที่ล้าสมัย (เช่น ลิงก์แจ้งเตือนที่ยังไม่มี deep link) */
-const APP_VERSION = '2026-07-24.5';
+const APP_VERSION = '2026-07-24.6';
 
 async function storeGet(key){
   try{
@@ -493,6 +506,7 @@ function removePhoto(idx){
 async function submitOrder(){
   const f = state.form;
   if(!f.dept){ toast('กรุณาเลือกแผนก', true); return; }
+  if(!f.docType){ toast('กรุณาเลือกประเภทเอกสาร', true); return; }
   if(!f.machineCode){ toast('กรุณาเลือกรหัสเครื่องจักร', true); return; }
   if(!f.cause || !f.cause.trim()){ toast('กรุณาระบุอาการ/สาเหตุที่ต้องการแจ้งซ่อม', true); return; }
   if(!f.neededDate){ toast('กรุณาระบุวันที่ต้องการใช้งาน', true); return; }
@@ -510,11 +524,12 @@ async function submitOrder(){
 
   const id = uid();
   const order = {
-    id, docNumber, department: f.dept, machineCode: f.machineCode, machineName: f.machineName,
+    id, docNumber, department: f.dept, docType: f.docType, machineCode: f.machineCode, machineName: f.machineName,
     cause: f.cause.trim(), neededDate: f.neededDate, requestedBy: f.requestedBy.trim(),
     createdAt: nowIso(), status: 'PENDING_FM', photoCount: f.photos.length,
     approvals: { fm:{status:null,by:'',at:'',note:''}, gm:{status:null,by:'',at:'',note:''} },
-    assignment: { technicians:[], assignedBy:'', assignedAt:'', startDate:'', endDate:'' },
+    assignment: { technicians:[], assignedBy:'', assignedAt:'', startDate:'', endDate:'', executionPlan:'', receivedByName:'' },
+    maintRecord: null,
     statusHistory: [{ status:'PENDING_FM', at: nowIso(), note:'สร้างใบแจ้งซ่อม โดย ' + f.requestedBy.trim() }],
   };
   const newOrders = [order, ...state.orders];
@@ -700,12 +715,16 @@ async function assignTechnician(id){
   const techs = [...new Set(state.ui.assignTechs.filter(Boolean))];
   const startDate = state.ui.assignStartDate;
   const endDate = state.ui.assignEndDate;
+  const receivedBy = (state.ui.assignReceivedBy||'').trim();
+  const executionPlan = state.ui.assignExecutionPlan;
+  if(!receivedBy){ toast('กรุณาระบุชื่อผู้จัดการที่รับใบแจ้งซ่อม', true); return; }
   if(!startDate || !endDate){ toast('กรุณากำหนดวันเริ่มงานและวันที่คาดว่าจะเสร็จก่อนมอบหมายงาน', true); return; }
   if(endDate < startDate){ toast('วันที่คาดว่าจะเสร็จต้องไม่ก่อนวันเริ่มงาน', true); return; }
   if(!techs.length){ toast('กรุณาเลือกชื่อช่างผู้รับผิดชอบอย่างน้อย 1 คน', true); return; }
-  o.assignment = { technicians: techs, assignedBy: ROLES.maint.label, assignedAt: nowIso(), startDate, endDate };
+  if(!executionPlan){ toast('กรุณาเลือกการดำเนินงาน', true); return; }
+  o.assignment = { technicians: techs, assignedBy: ROLES.maint.label, assignedAt: nowIso(), startDate, endDate, executionPlan, receivedByName: receivedBy };
   o.status = 'ASSIGNED';
-  o.statusHistory.push({ status:'ASSIGNED', at: nowIso(), note:`มอบหมายงานให้ ${techs.join(', ')} (กำหนดงาน ${fmtDate(startDate)} - ${fmtDate(endDate)})` });
+  o.statusHistory.push({ status:'ASSIGNED', at: nowIso(), note:`รับใบแจ้งซ่อมโดย ${receivedBy} — มอบหมายงานให้ ${techs.join(', ')} (กำหนดงาน ${fmtDate(startDate)} - ${fmtDate(endDate)}) — การดำเนินงาน: ${EXECUTION_PLAN_META[executionPlan]}` });
   await persistOrders();
   await pushNotification('requester', id, o.docNumber, `งานซ่อมของท่านถูกมอบหมายให้ ${techs.join(', ')} แล้ว สถานะ: รอดำเนินการ`);
   for(const tech of techs){
@@ -714,8 +733,44 @@ async function assignTechnician(id){
   state.ui.assignTechs = [''];
   state.ui.assignStartDate = '';
   state.ui.assignEndDate = '';
+  state.ui.assignReceivedBy = '';
+  state.ui.assignExecutionPlan = '';
   toast('มอบหมายงานเรียบร้อย');
   render();
+}
+
+/* ============================= MAINTENANCE RECORD (ผจก.แผนกซ่อมบำรุง) ============================= */
+function openMaintRecord(id){
+  const o = getOrder(id); if(!o) return;
+  const mr = o.maintRecord;
+  state.ui.maintRecordFor = id;
+  state.ui.maintRecordCause = mr ? mr.causeAnalysis : '';
+  state.ui.maintRecordOpinion = mr ? mr.inspectorOpinion : '';
+  state.ui.maintRecordParts = (mr && mr.parts && mr.parts.length) ? mr.parts.map(p=>({...p})) : [emptyPartRow()];
+  render();
+}
+function closeMaintRecord(){
+  state.ui.maintRecordFor = null; state.ui.maintRecordCause=''; state.ui.maintRecordOpinion='';
+  state.ui.maintRecordParts = [emptyPartRow()];
+  render();
+}
+function addMaintPartRow(){ state.ui.maintRecordParts.push(emptyPartRow()); render(); }
+function removeMaintPartRow(i){ state.ui.maintRecordParts.splice(i,1); render(); }
+function setMaintPart(i, field, v){ state.ui.maintRecordParts[i][field] = v; }
+async function saveMaintRecord(id){
+  const o = getOrder(id); if(!o) return;
+  const cause = state.ui.maintRecordCause.trim();
+  const opinion = state.ui.maintRecordOpinion;
+  if(!cause){ toast('กรุณาระบุผลการวิเคราะห์สาเหตุ/อาการที่ชำรุด', true); return; }
+  if(!opinion){ toast('กรุณาเลือกความคิดเห็นของช่างผู้ตรวจสอบ', true); return; }
+  const parts = state.ui.maintRecordParts
+    .filter(p => p.name.trim())
+    .map(p => ({ name:p.name.trim(), qty:p.qty.trim(), unit:p.unit.trim(), price:p.price.trim(), shop:p.shop.trim(), note:p.note.trim() }));
+  o.maintRecord = { causeAnalysis: cause, inspectorOpinion: opinion, parts, updatedBy: ROLES.maint.label, updatedAt: nowIso() };
+  o.statusHistory.push({ status:o.status, at: nowIso(), note:'ผู้จัดการแผนกซ่อมบำรุงบันทึกข้อมูลซ่อมบำรุง (วิเคราะห์สาเหตุ/รายการอะไหล่)' });
+  await persistOrders();
+  toast('บันทึกข้อมูลซ่อมบำรุงเรียบร้อย');
+  closeMaintRecord();
 }
 async function startRepair(id){
   const o = getOrder(id); if(!o) return;
@@ -832,7 +887,7 @@ function renderHeader(){
     </div>
   </header>
   <nav class="tabs">
-    <button class="${state.view==='new'?'active':''}" onclick="setView('new')">➕ แจ้งซ่อมใหม่</button>
+    <button class="${state.view==='new'?'active':''}" onclick="setView('new')">➕ ใบคำร้อง/ใบแจ้งซ่อม</button>
     <button class="${state.view==='list'||state.view==='detail'?'active':''}" onclick="setView('list')">📋 รายการแจ้งซ่อม</button>
     <button class="${state.view==='notif'?'active':''}" onclick="setView('notif')">🔔 การแจ้งเตือน${unreadCountForRole(state.role)>0?`<span class="badge">${unreadCountForRole(state.role)}</span>`:''}</button>
     ${state.role==='admin' ? `<button class="${state.view==='settings'?'active':''}" onclick="setView('settings')">⚙️ ตั้งค่าข้อมูลหลัก</button>` : ''}
@@ -881,8 +936,8 @@ function renderNew(){
     <div class="photo-thumb"><img src="${p}"><button class="rm" onclick="removePhoto(${i})">✕</button></div>`).join('');
 
   return `
-  <h2 class="view-title">แจ้งซ่อมใหม่</h2>
-  <p class="view-sub">กรอกรายละเอียดใบแจ้งซ่อม ระบบจะออกเลขที่เอกสารและแจ้งเตือนผู้อนุมัติให้อัตโนมัติ</p>
+  <h2 class="view-title">ใบคำร้อง / ใบแจ้งซ่อม</h2>
+  <p class="view-sub">กรอกรายละเอียดใบคำร้อง/ใบแจ้งซ่อม ระบบจะออกเลขที่เอกสารและแจ้งเตือนผู้อนุมัติให้อัตโนมัติ</p>
   <div class="card">
     <div class="field">
       <label class="field-label">1. เลือกแผนกที่ต้องการแจ้งซ่อม <span class="req-star">*</span></label>
@@ -891,16 +946,25 @@ function renderNew(){
 
     <div class="docnum-box">
       <span class="doc-chip">${previewDocNumber(f.dept)}</span>
-      <span class="hint">เลขที่ใบแจ้งซ่อม (รันอัตโนมัติตามแผนกที่เลือก — ยืนยันเมื่อกดส่งใบแจ้งซ่อม)</span>
+      <span class="hint">เลขที่เอกสาร (รันอัตโนมัติตามแผนกที่เลือก — ยืนยันเมื่อกดส่ง)</span>
     </div>
 
     <div class="field">
-      <label class="field-label">2. รหัสเครื่องจักร <span class="req-star">*</span></label>
+      <label class="field-label">2. ประเภทเอกสาร <span class="req-star">*</span></label>
+      <select class="input" onchange="updateFormField('docType', this.value)">
+        <option value="">-- เลือกประเภทเอกสาร --</option>
+        <option value="request" ${f.docType==='request'?'selected':''}>1. ใบคำร้อง</option>
+        <option value="repair" ${f.docType==='repair'?'selected':''}>2. ใบแจ้งซ่อม</option>
+      </select>
+    </div>
+
+    <div class="field">
+      <label class="field-label">3. รหัสเครื่องจักร <span class="req-star">*</span></label>
       ${machineSection}
     </div>
 
     <div class="field">
-      <label class="field-label">3. อาการ / สาเหตุที่ต้องการแจ้งซ่อม <span class="req-star">*</span></label>
+      <label class="field-label">4. อาการ / สาเหตุที่ต้องการแจ้งซ่อม <span class="req-star">*</span></label>
       <textarea class="input" data-fid="cause" placeholder="อธิบายอาการเสีย หรือสาเหตุที่พบ..." oninput="updateFormField('cause', this.value)">${escapeHtml(f.cause)}</textarea>
     </div>
 
@@ -913,7 +977,7 @@ function renderNew(){
 
     <div class="grid-2">
       <div class="field">
-        <label class="field-label">4. วันที่ต้องการใช้งาน <span class="req-star">*</span></label>
+        <label class="field-label">5. วันที่ต้องการใช้งาน <span class="req-star">*</span></label>
         <input class="input" data-fid="neededDate" type="date" value="${f.neededDate}" oninput="updateFormField('neededDate', this.value)">
       </div>
       <div class="field">
@@ -922,7 +986,7 @@ function renderNew(){
       </div>
     </div>
 
-    <button class="btn btn-primary btn-block" onclick="submitOrder()">📨 ส่งใบแจ้งซ่อม</button>
+    <button class="btn btn-primary btn-block" onclick="submitOrder()">📨 ส่งเอกสาร</button>
   </div>`;
 }
 
@@ -941,6 +1005,7 @@ function renderList(){
         <div>
           <span class="doc-chip" style="font-size:14px; padding:3px 9px;">${o.docNumber}</span>
           <span style="margin-left:8px; font-weight:600; color:var(--navy);">${o.department}</span>
+          ${o.docType ? `<span style="margin-left:8px; font-size:11.5px; color:var(--slate);">${DOC_TYPES[o.docType]||''}</span>` : ''}
         </div>
         <span class="status-pill" style="color:${meta.color}; background:${meta.bg};">${meta.label}</span>
       </div>
@@ -1059,19 +1124,31 @@ function renderDetail(){
       </div>`).join('');
     actionBox = `
     <div class="action-box">
-      <h4>มอบหมายช่างผู้รับผิดชอบ</h4>
-      <div class="grid-2" style="margin-bottom:10px;">
+      <h4>รับใบแจ้งซ่อม / มอบหมายช่างผู้รับผิดชอบ</h4>
+      <div class="field">
+        <label class="field-label">ผู้จัดการแผนกซ่อมบำรุงผู้รับเรื่อง (รับใบแจ้งซ่อม) <span class="req-star">*</span></label>
+        <input class="input" data-fid="assignReceivedBy" type="text" placeholder="ชื่อ-นามสกุล" value="${escapeHtml(state.ui.assignReceivedBy)}" oninput="state.ui.assignReceivedBy=this.value">
+      </div>
+      <label class="field-label">การมอบหมายงาน — ช่างผู้รับผิดชอบ <span class="req-star">*</span></label>
+      ${rows}
+      <button class="btn btn-outline btn-sm" onclick="addAssignTechRow()">+ เพิ่มช่าง</button>
+      <div class="grid-2" style="margin:14px 0 10px;">
         <div class="field" style="margin-bottom:0;">
           <label class="field-label">วันที่เริ่มงาน <span class="req-star">*</span></label>
           <input type="date" class="input" value="${state.ui.assignStartDate}" onchange="state.ui.assignStartDate=this.value">
         </div>
         <div class="field" style="margin-bottom:0;">
-          <label class="field-label">วันที่คาดว่าจะเสร็จ <span class="req-star">*</span></label>
+          <label class="field-label">กำหนดการดำเนินงานเสร็จสิ้น <span class="req-star">*</span></label>
           <input type="date" class="input" value="${state.ui.assignEndDate}" onchange="state.ui.assignEndDate=this.value">
         </div>
       </div>
-      ${rows}
-      <button class="btn btn-outline btn-sm" onclick="addAssignTechRow()">+ เพิ่มช่าง</button>
+      <div class="field">
+        <label class="field-label">การดำเนินงาน <span class="req-star">*</span></label>
+        <select class="input" onchange="state.ui.assignExecutionPlan=this.value">
+          <option value="">-- เลือก --</option>
+          ${Object.entries(EXECUTION_PLAN_META).map(([k,v])=>`<option value="${k}" ${state.ui.assignExecutionPlan===k?'selected':''}>${v}</option>`).join('')}
+        </select>
+      </div>
       <div class="order-actions" style="margin-top:10px;">
         <button class="btn btn-primary" onclick="assignTechnician('${o.id}')">มอบหมายงาน</button>
       </div>
@@ -1090,6 +1167,75 @@ function renderDetail(){
     </div>`;
   }
 
+  // "บันทึกข้อมูลซ่อมบำรุง" — เอกสารประกอบตามใบมอบหมายงาน/ใบวิเคราะห์สาเหตุของ ผจก.แผนกซ่อมบำรุง
+  // แสดงให้ทุกบทบาทเห็นแบบอ่านอย่างเดียวหลังมอบหมายงานแล้ว แต่แก้ไข/บันทึกได้เฉพาะ role==='maint'
+  let maintRecordSection = '';
+  if(assignedTechs(o).length){
+    const mr = o.maintRecord;
+    const editingRecord = state.ui.maintRecordFor === o.id;
+    if(editingRecord){
+      const partRows = state.ui.maintRecordParts.map((p,i) => `
+        <tr>
+          <td>${i+1}</td>
+          <td><input class="input" style="min-width:130px;" value="${escapeHtml(p.name)}" oninput="setMaintPart(${i},'name',this.value)" placeholder="รายการอะไหล่/วัสดุที่ใช้"></td>
+          <td><input class="input" style="width:64px;" value="${escapeHtml(p.qty)}" oninput="setMaintPart(${i},'qty',this.value)"></td>
+          <td><input class="input" style="width:64px;" value="${escapeHtml(p.unit)}" oninput="setMaintPart(${i},'unit',this.value)"></td>
+          <td><input class="input" style="width:84px;" value="${escapeHtml(p.price)}" oninput="setMaintPart(${i},'price',this.value)"></td>
+          <td><input class="input" style="min-width:100px;" value="${escapeHtml(p.shop)}" oninput="setMaintPart(${i},'shop',this.value)"></td>
+          <td><input class="input" style="min-width:100px;" value="${escapeHtml(p.note)}" oninput="setMaintPart(${i},'note',this.value)"></td>
+          <td>${state.ui.maintRecordParts.length>1 ? `<button class="del" onclick="removeMaintPartRow(${i})">✕</button>` : ''}</td>
+        </tr>`).join('');
+      maintRecordSection = `
+      <div class="action-box">
+        <h4>บันทึกข้อมูลซ่อมบำรุง (ผจก.แผนกซ่อมบำรุง)</h4>
+        <div class="field">
+          <label class="field-label">วิเคราะห์สาเหตุ / อาการที่ชำรุด พบว่า <span class="req-star">*</span></label>
+          <textarea class="input" oninput="state.ui.maintRecordCause=this.value" placeholder="ระบุผลการวิเคราะห์สาเหตุ...">${escapeHtml(state.ui.maintRecordCause)}</textarea>
+        </div>
+        <div class="field">
+          <label class="field-label">ความคิดเห็นของช่างผู้ตรวจสอบ <span class="req-star">*</span></label>
+          <select class="input" onchange="state.ui.maintRecordOpinion=this.value">
+            <option value="">-- เลือก --</option>
+            ${Object.entries(INSPECTOR_OPINION_META).map(([k,v])=>`<option value="${k}" ${state.ui.maintRecordOpinion===k?'selected':''}>${v}</option>`).join('')}
+          </select>
+        </div>
+        <div class="field" style="margin-bottom:8px;">
+          <label class="field-label">รายการอะไหล่ / วัสดุที่ใช้ (เฉพาะเครื่องจักรมีรหัส)</label>
+          <div style="overflow-x:auto;">
+            <table class="mini">
+              <tr><th>ลำดับ</th><th>รายการ</th><th>จำนวน</th><th>หน่วย</th><th>ราคา</th><th>ชื่อร้าน</th><th>หมายเหตุ</th><th></th></tr>
+              ${partRows}
+            </table>
+          </div>
+          <button class="btn btn-outline btn-sm" style="margin-top:8px;" onclick="addMaintPartRow()">+ เพิ่มรายการ</button>
+        </div>
+        <div class="order-actions">
+          <button class="btn btn-primary" onclick="saveMaintRecord('${o.id}')">บันทึก</button>
+          <button class="btn btn-outline" onclick="closeMaintRecord()">ยกเลิก</button>
+        </div>
+      </div>`;
+    } else {
+      maintRecordSection = `
+      <div class="action-box">
+        <h4>บันทึกข้อมูลซ่อมบำรุง (เอกสารประกอบ)</h4>
+        ${mr ? `
+          <div class="kv"><div class="k">วิเคราะห์สาเหตุ / อาการที่ชำรุด</div><div class="v">${escapeHtml(mr.causeAnalysis)}</div></div>
+          <div class="kv"><div class="k">ความคิดเห็นของช่างผู้ตรวจสอบ</div><div class="v">${INSPECTOR_OPINION_META[mr.inspectorOpinion]||'-'}</div></div>
+          ${mr.parts && mr.parts.length ? `
+          <div class="kv"><div class="k">รายการอะไหล่ / วัสดุที่ใช้</div>
+            <div style="overflow-x:auto;">
+              <table class="mini">
+                <tr><th>ลำดับ</th><th>รายการ</th><th>จำนวน</th><th>หน่วย</th><th>ราคา</th><th>ชื่อร้าน</th><th>หมายเหตุ</th></tr>
+                ${mr.parts.map((p,i)=>`<tr><td>${i+1}</td><td>${escapeHtml(p.name)}</td><td>${escapeHtml(p.qty)}</td><td>${escapeHtml(p.unit)}</td><td>${escapeHtml(p.price)}</td><td>${escapeHtml(p.shop)}</td><td>${escapeHtml(p.note)}</td></tr>`).join('')}
+              </table>
+            </div>
+          </div>` : ''}
+        ` : `<p class="desc" style="margin:0 0 10px;">ยังไม่มีการบันทึกข้อมูล</p>`}
+        ${state.role==='maint' ? `<div class="order-actions"><button class="btn btn-outline btn-sm" onclick="openMaintRecord('${o.id}')">${mr?'แก้ไขบันทึก':'📋 บันทึกข้อมูลซ่อมบำรุง'}</button></div>` : ''}
+      </div>`;
+    }
+  }
+
   return `
   <button class="back-link" onclick="backToList()">← กลับไปรายการแจ้งซ่อม</button>
   <div class="detail-head">
@@ -1101,18 +1247,22 @@ function renderDetail(){
   </div>
   <div class="card">
     <div class="grid-2">
+      <div class="kv"><div class="k">ประเภทเอกสาร</div><div class="v">${o.docType ? DOC_TYPES[o.docType] : '—'}</div></div>
       <div class="kv"><div class="k">รหัสเครื่องจักร</div><div class="v mono">${escapeHtml(o.machineCode)}</div></div>
       <div class="kv"><div class="k">ชื่อเครื่องจักร</div><div class="v">${escapeHtml(o.machineName)}</div></div>
       <div class="kv"><div class="k">ผู้แจ้ง</div><div class="v">${escapeHtml(o.requestedBy)}</div></div>
       <div class="kv"><div class="k">วันที่ต้องการใช้งาน</div><div class="v">${fmtDate(o.neededDate)}</div></div>
       <div class="kv"><div class="k">แจ้งเมื่อ</div><div class="v">${fmtDateTime(o.createdAt)}</div></div>
       <div class="kv"><div class="k">ช่างผู้รับผิดชอบ</div><div class="v">${assignedTechs(o).length ? assignedTechs(o).map(escapeHtml).join(', ') : '—'}</div></div>
+      ${o.assignment.receivedByName ? `<div class="kv"><div class="k">ผู้รับใบแจ้งซ่อม</div><div class="v">${escapeHtml(o.assignment.receivedByName)}</div></div>` : ''}
       ${o.assignment.startDate ? `<div class="kv"><div class="k">วันที่เริ่มงาน</div><div class="v">${fmtDate(o.assignment.startDate)}</div></div>` : ''}
-      ${o.assignment.endDate ? `<div class="kv"><div class="k">วันที่คาดว่าจะเสร็จ</div><div class="v">${fmtDate(o.assignment.endDate)}</div></div>` : ''}
+      ${o.assignment.endDate ? `<div class="kv"><div class="k">กำหนดการดำเนินงานเสร็จสิ้น</div><div class="v">${fmtDate(o.assignment.endDate)}</div></div>` : ''}
+      ${o.assignment.executionPlan ? `<div class="kv"><div class="k">การดำเนินงาน</div><div class="v">${EXECUTION_PLAN_META[o.assignment.executionPlan]}</div></div>` : ''}
     </div>
     <div class="kv"><div class="k">อาการ / สาเหตุ</div><div class="v">${escapeHtml(o.cause)}</div></div>
     ${gallery}
     ${actionBox}
+    ${maintRecordSection}
     <div class="kv" style="margin-top:20px;"><div class="k">ลำดับเหตุการณ์</div><div class="timeline">${timeline}</div></div>
   </div>`;
 }
