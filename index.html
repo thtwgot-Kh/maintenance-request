@@ -351,11 +351,12 @@ async function authenticate(){
 }
 async function storeSet(key, val){
   try{
-    await fetch(API_URL, {
+    const res = await fetch(API_URL, {
       method:'POST',
       headers:{'Content-Type':'text/plain;charset=utf-8'},
       body: JSON.stringify({ key, value: JSON.stringify(val) })
     });
+    if(!res.ok) throw new Error('HTTP ' + res.status);
     return true;
   }catch(e){ console.error('storage set failed', key, e); return false; }
 }
@@ -499,14 +500,13 @@ async function submitOrder(){
 
   // re-fetch counters right before incrementing to reduce race window
   const freshCounters = await storeGet('counters');
-  state.counters = freshCounters || state.counters;
+  const counters = freshCounters || state.counters;
   const yy = yyNow();
-  if(!state.counters[f.dept]) state.counters[f.dept] = {};
-  const last = state.counters[f.dept][yy] || 0;
-  const next = last + 1;
-  state.counters[f.dept][yy] = next;
+  const deptCounters = { ...(counters[f.dept] || {}) };
+  const next = (deptCounters[yy] || 0) + 1;
+  deptCounters[yy] = next;
+  const newCounters = { ...counters, [f.dept]: deptCounters };
   const docNumber = String(next).padStart(3,'0') + '/' + yy;
-  await storeSet('counters', state.counters);
 
   const id = uid();
   const order = {
@@ -517,9 +517,23 @@ async function submitOrder(){
     assignment: { technicians:[], assignedBy:'', assignedAt:'', startDate:'', endDate:'' },
     statusHistory: [{ status:'PENDING_FM', at: nowIso(), note:'สร้างใบแจ้งซ่อม โดย ' + f.requestedBy.trim() }],
   };
-  state.orders.unshift(order);
-  await storeSet('orders', state.orders);
-  if(f.photos.length){ await storeSet('photos:'+id, f.photos); }
+  const newOrders = [order, ...state.orders];
+
+  // เขียน "orders" ก่อน — นี่คือข้อมูลตัวจริงของใบแจ้งซ่อม ต้องสำเร็จก่อนถึงจะถือว่าส่งคำร้องได้จริง
+  // ห้ามอัปเดต state.orders/แสดงข้อความสำเร็จถ้า storeSet ล้มเหลว (เช่น deploy สิทธิ์ผิด, เน็ตหลุด)
+  // มิฉะนั้นผู้ใช้จะเห็นว่า "ส่งเรียบร้อย" ทั้งที่ข้อมูลไม่เข้าชีตจริง
+  const ordersOk = await storeSet('orders', newOrders);
+  if(!ordersOk){
+    toast('ส่งใบแจ้งซ่อมไม่สำเร็จ (เชื่อมต่อฐานข้อมูลไม่ได้) กรุณาลองใหม่อีกครั้ง', true);
+    return;
+  }
+  state.orders = newOrders;
+  state.counters = newCounters;
+  storeSet('counters', newCounters); // best-effort, ไม่บล็อกเพราะใบแจ้งซ่อมถูกบันทึกแล้ว
+  if(f.photos.length){
+    const photosOk = await storeSet('photos:'+id, f.photos);
+    if(!photosOk) toast('บันทึกรูปภาพแนบไม่สำเร็จ แต่ใบแจ้งซ่อมถูกบันทึกแล้ว', true);
+  }
 
   await pushNotification('fm', id, docNumber, `มีใบแจ้งซ่อมใหม่จากแผนก ${f.dept} รอการอนุมัติของท่าน`);
 
@@ -1284,8 +1298,10 @@ async function checkForUpdate(){
   } else {
     render();
   }
-  setInterval(pollForUpdates, 7000);
+  setInterval(pollForUpdates, 3000);
   setInterval(checkForUpdate, 120000);
+  // รีเฟรชทันทีเมื่อผู้ใช้กลับมาที่แท็บนี้ (สลับแท็บ/แอปแล้วกลับมา) แทนที่จะรอรอบ poll ถัดไป
+  document.addEventListener('visibilitychange', () => { if(!document.hidden) pollForUpdates(); });
 })();
 </script>
 </body>
