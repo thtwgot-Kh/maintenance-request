@@ -248,6 +248,11 @@ const ROLES = {
   tech:      { label:'ช่าง', icon:'🧰' },
   admin:     { label:'ผู้ดูแลระบบ (ตั้งค่า)', icon:'⚙️' },
 };
+// admin เป็น super-role — เข้าถึงฟังก์ชันของทุกบทบาทได้โดยไม่ต้องมีแถวสิทธิ์แยกในชีต
+// "สิทธิ์ผู้ใช้ LINE" ทุกจุดที่เช็ค state.role===<role> เพื่อโชว์ปุ่ม/กล่องการทำงานของบทบาทนั้น
+// ให้เรียก hasRole(<role>) แทน ส่วนการ "ตัดสินใจว่าจะรันฟังก์ชันไหน" (เช่นใน confirmAction)
+// ต้องอิงจากสถานะใบแจ้งซ่อม ไม่ใช่ state.role ตรงๆ เพราะ admin ผ่าน hasRole ได้ทุกบทบาทพร้อมกัน
+function hasRole(role){ return state.role === role || state.role === 'admin'; }
 const STATUS_META = {
   PENDING_FM:    { label:'รออนุมัติ (ผจก.โรงงาน)', color:'#c17f1e', bg:'#fbf0dd' },
   PENDING_GM:    { label:'รออนุมัติ (ผจก.ทั่วไป)',  color:'#c17f1e', bg:'#fbf0dd' },
@@ -328,7 +333,7 @@ const APP_URL = 'https://thtwgot-kh.github.io/maintenance-request/';
 const LIFF_ID = '2010789633-I8KJNM4H';
 /* บั๊มเลขนี้ทุกครั้งที่แก้ไข index.html — ใช้เทียบกับไฟล์ล่าสุดบนเซิร์ฟเวอร์เพื่อเตือนแท็บที่เปิดค้าง
    ไว้นานให้รีเฟรช ป้องกันปัญหาแท็บเก่ารันโค้ดที่ล้าสมัย (เช่น ลิงก์แจ้งเตือนที่ยังไม่มี deep link) */
-const APP_VERSION = '2026-07-24.8';
+const APP_VERSION = '2026-07-24.9';
 
 async function storeGet(key){
   try{
@@ -448,6 +453,7 @@ async function pushNotification(toRole, orderId, docNumber, message){
   await tryLineWebhook(toRole, `[${docNumber}] ${message}\n${orderDeepLink(orderId, toRole)}`);
 }
 function unreadCountForRole(role){
+  if(role === 'admin') return state.notifications.filter(n => !n.read).length;
   return state.notifications.filter(n => n.toRole === role && !n.read).length;
 }
 
@@ -580,9 +586,9 @@ async function openDetail(id){
   state.ui.actionFor = null; state.ui.actionType = null; state.ui.actionNote='';
   const photos = await storeGet('photos:'+id);
   state.detailPhotos = photos || [];
-  // mark related notifications read for current role
+  // mark related notifications read for current role (admin: all roles' notifications for this order)
   let changed = false;
-  state.notifications.forEach(n => { if(n.orderId === id && n.toRole === state.role && !n.read){ n.read = true; changed = true; } });
+  state.notifications.forEach(n => { if(n.orderId === id && (state.role === 'admin' || n.toRole === state.role) && !n.read){ n.read = true; changed = true; } });
   if(changed) await storeSet('notifications', state.notifications);
   render();
 }
@@ -615,21 +621,24 @@ async function handleResubmitPhotoInput(files){
 function removeResubmitPhoto(idx){
   state.ui.resubmitPhotos.splice(idx,1); render();
 }
+// อิงจากสถานะใบแจ้งซ่อม (ไม่ใช่ state.role ตรงๆ) เพื่อให้ admin ซึ่งผ่าน hasRole() ได้ทุกบทบาท
+// พร้อมกัน ยังคงรันฟังก์ชันที่ถูกต้องตรงกับกล่องการทำงานที่กำลังเปิดอยู่จริง
 function confirmAction(id){
+  const o = getOrder(id); if(!o) return;
   const type = state.ui.actionType;
   const note = state.ui.actionNote.trim();
   if(type !== 'approve' && type !== 'verify_pass' && !note){ toast('กรุณาระบุหมายเหตุ', true); return; }
-  if(state.role === 'fm'){
+  if(o.status === 'PENDING_FM'){
     if(type==='approve') approveFm(id, note);
     else if(type==='reject') rejectFm(id, note);
     else if(type==='needinfo') needInfoFm(id, note);
-  } else if(state.role === 'gm'){
+  } else if(o.status === 'PENDING_GM'){
     if(type==='approve') approveGm(id, note);
     else if(type==='reject') rejectGm(id, note);
     else if(type==='needinfo') needInfoGm(id, note);
-  } else if(state.role === 'requester' && type === 'resubmit'){
+  } else if((o.status === 'NEEDS_INFO_FM' || o.status === 'NEEDS_INFO_GM') && type === 'resubmit'){
     resubmitInfo(id, note);
-  } else if(state.role === 'requester' && (type === 'verify_pass' || type === 'verify_fail')){
+  } else if(o.status === 'PENDING_VERIFY' && (type === 'verify_pass' || type === 'verify_fail')){
     verifyRepair(id, type, note);
   }
 }
@@ -1122,7 +1131,7 @@ function renderDetail(){
       </div>`;
   }
 
-  if(state.role==='fm' && o.status==='PENDING_FM'){
+  if(hasRole('fm') && o.status==='PENDING_FM'){
     actionBox = `
     <div class="action-box">
       <h4>รออนุมัติจากผู้จัดการโรงงาน</h4>
@@ -1133,7 +1142,7 @@ function renderDetail(){
       </div>
       ${noteBox()}
     </div>`;
-  } else if(state.role==='gm' && o.status==='PENDING_GM'){
+  } else if(hasRole('gm') && o.status==='PENDING_GM'){
     actionBox = `
     <div class="action-box">
       <h4>รออนุมัติจากผู้จัดการทั่วไป</h4>
@@ -1144,7 +1153,7 @@ function renderDetail(){
       </div>
       ${noteBox()}
     </div>`;
-  } else if(state.role==='requester' && (o.status==='NEEDS_INFO_FM' || o.status==='NEEDS_INFO_GM')){
+  } else if(hasRole('requester') && (o.status==='NEEDS_INFO_FM' || o.status==='NEEDS_INFO_GM')){
     actionBox = `
     <div class="action-box">
       <h4>ต้องการข้อมูลเพิ่มเติมจากท่าน</h4>
@@ -1153,7 +1162,7 @@ function renderDetail(){
       </div>
       ${noteBox()}
     </div>`;
-  } else if(state.role==='requester' && o.status==='PENDING_VERIFY'){
+  } else if(hasRole('requester') && o.status==='PENDING_VERIFY'){
     actionBox = `
     <div class="action-box">
       <h4>ตรวจสอบผลการซ่อม</h4>
@@ -1164,7 +1173,7 @@ function renderDetail(){
       </div>
       ${noteBox()}
     </div>`;
-  } else if(state.role==='maint' && o.status==='PENDING_ASSIGN'){
+  } else if(hasRole('maint') && o.status==='PENDING_ASSIGN'){
     const rows = state.ui.assignTechs.map((val, i) => `
       <div class="inline-form" style="margin-bottom:6px;">
         <select class="input" onchange="setAssignTech(${i}, this.value)">
@@ -1204,13 +1213,13 @@ function renderDetail(){
         <button class="btn btn-primary" onclick="assignTechnician('${o.id}')">มอบหมายงาน</button>
       </div>
     </div>`;
-  } else if(state.role==='tech' && o.status==='ASSIGNED' && assignedTechs(o).includes(state.myTechName)){
+  } else if(hasRole('tech') && o.status==='ASSIGNED' && (state.role==='admin' || assignedTechs(o).includes(state.myTechName))){
     actionBox = `
     <div class="action-box">
       <h4>งานถูกมอบหมายแล้ว — รอเริ่มดำเนินการ</h4>
       <div class="order-actions"><button class="btn btn-primary" onclick="startRepair('${o.id}')">▶ เริ่มดำเนินการซ่อม</button></div>
     </div>`;
-  } else if(state.role==='tech' && o.status==='IN_PROGRESS' && assignedTechs(o).includes(state.myTechName)){
+  } else if(hasRole('tech') && o.status==='IN_PROGRESS' && (state.role==='admin' || assignedTechs(o).includes(state.myTechName))){
     actionBox = `
     <div class="action-box">
       <h4>กำลังซ่อม</h4>
@@ -1282,7 +1291,7 @@ function renderDetail(){
             </div>
           </div>` : ''}
         ` : `<p class="desc" style="margin:0 0 10px;">ยังไม่มีการบันทึกข้อมูล</p>`}
-        ${state.role==='maint' ? `<div class="order-actions"><button class="btn btn-outline btn-sm" onclick="openMaintRecord('${o.id}')">${mr?'แก้ไขบันทึก':'📋 บันทึกข้อมูลซ่อมบำรุง'}</button></div>` : ''}
+        ${hasRole('maint') ? `<div class="order-actions"><button class="btn btn-outline btn-sm" onclick="openMaintRecord('${o.id}')">${mr?'แก้ไขบันทึก':'📋 บันทึกข้อมูลซ่อมบำรุง'}</button></div>` : ''}
       </div>`;
     }
   }
@@ -1327,23 +1336,27 @@ function renderDetail(){
 
 /* ============================= RENDER: NOTIFICATIONS ============================= */
 async function markAllRead(){
-  state.notifications.forEach(n => { if(n.toRole===state.role) n.read = true; });
+  state.notifications.forEach(n => { if(state.role==='admin' || n.toRole===state.role) n.read = true; });
   await storeSet('notifications', state.notifications);
   render();
 }
 function renderNotif(){
-  const mine = state.notifications.filter(n => n.toRole === state.role);
+  // admin เห็นการแจ้งเตือนของทุกบทบาทรวมกัน (ตรงกับ "เข้าถึงทุกฟังก์ชัน")
+  const mine = state.role === 'admin' ? state.notifications : state.notifications.filter(n => n.toRole === state.role);
   const items = mine.map(n => `
     <div class="notif-item ${n.read?'':'unread'}">
       <div class="notif-icon">🔔</div>
       <div>
-        <div class="notif-text"><b class="mono">${n.docNumber}</b> — ${escapeHtml(n.message)}</div>
+        <div class="notif-text">
+          ${state.role==='admin' ? `<span class="status-pill" style="color:#6b7785; background:#eef0f2; margin-right:6px;">${ROLES[n.toRole] ? ROLES[n.toRole].label : n.toRole}</span>` : ''}
+          <b class="mono">${n.docNumber}</b> — ${escapeHtml(n.message)}
+        </div>
         <div class="notif-time">${fmtDateTime(n.createdAt)}</div>
       </div>
     </div>`).join('');
   return `
   <h2 class="view-title">การแจ้งเตือน — ${ROLES[state.role].label}</h2>
-  <p class="view-sub">การแจ้งเตือนในระบบสำหรับบทบาทนี้ (พร้อมส่งต่อไปยัง LINE หากตั้งค่า Webhook ไว้ในหน้าตั้งค่า)</p>
+  <p class="view-sub">${state.role==='admin' ? 'การแจ้งเตือนในระบบของทุกบทบาทรวมกัน' : 'การแจ้งเตือนในระบบสำหรับบทบาทนี้'} (พร้อมส่งต่อไปยัง LINE หากตั้งค่า Webhook ไว้ในหน้าตั้งค่า)</p>
   ${mine.length ? `<div style="margin-bottom:12px;"><button class="btn btn-outline btn-sm" onclick="markAllRead()">ทำเครื่องหมายว่าอ่านแล้วทั้งหมด</button></div>` : ''}
   ${mine.length ? items : `<div class="empty-state"><div class="big">📭</div>ยังไม่มีการแจ้งเตือนสำหรับบทบาทนี้</div>`}
   `;
