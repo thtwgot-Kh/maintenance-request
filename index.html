@@ -328,7 +328,7 @@ const APP_URL = 'https://thtwgot-kh.github.io/maintenance-request/';
 const LIFF_ID = '2010789633-I8KJNM4H';
 /* บั๊มเลขนี้ทุกครั้งที่แก้ไข index.html — ใช้เทียบกับไฟล์ล่าสุดบนเซิร์ฟเวอร์เพื่อเตือนแท็บที่เปิดค้าง
    ไว้นานให้รีเฟรช ป้องกันปัญหาแท็บเก่ารันโค้ดที่ล้าสมัย (เช่น ลิงก์แจ้งเตือนที่ยังไม่มี deep link) */
-const APP_VERSION = '2026-07-24.7';
+const APP_VERSION = '2026-07-24.8';
 
 async function storeGet(key){
   try{
@@ -811,6 +811,9 @@ async function verifyRepair(id, type, note){
     o.statusHistory.push({ status:'DONE', at: nowIso(), note:'ผู้แจ้งซ่อมตรวจสอบแล้ว: ผ่าน ใช้งานได้ปกติ' + (n ? ' — หมายเหตุ: ' + n : '') });
     await persistOrders();
     await pushNotification('maint', id, o.docNumber, `ผู้แจ้งซ่อมตรวจสอบแล้ว งานซ่อมแผนก ${o.department} ผ่าน ปิดงานเรียบร้อย`);
+    for(const tech of assignedTechs(o)){
+      await tryLineWebhook(tech, `[${o.docNumber}] ผู้แจ้งซ่อมตรวจสอบแล้ว งานซ่อมของคุณผ่าน ปิดงานเรียบร้อย ขอบคุณสำหรับการซ่อม${n ? '\nหมายเหตุจากผู้แจ้ง: ' + n : ''}\n${orderDeepLink(o.id, 'tech')}`);
+    }
     toast('ยืนยันผลการซ่อมเรียบร้อย ปิดงาน');
   } else {
     if(!n){ toast('กรุณาระบุสาเหตุที่ต้องซ่อมเพิ่มเติม', true); return; }
