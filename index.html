@@ -333,7 +333,7 @@ const APP_URL = 'https://thtwgot-kh.github.io/maintenance-request/';
 const LIFF_ID = '2010789633-I8KJNM4H';
 /* บั๊มเลขนี้ทุกครั้งที่แก้ไข index.html — ใช้เทียบกับไฟล์ล่าสุดบนเซิร์ฟเวอร์เพื่อเตือนแท็บที่เปิดค้าง
    ไว้นานให้รีเฟรช ป้องกันปัญหาแท็บเก่ารันโค้ดที่ล้าสมัย (เช่น ลิงก์แจ้งเตือนที่ยังไม่มี deep link) */
-const APP_VERSION = '2026-08-06.1';
+const APP_VERSION = '2026-08-06.2';
 
 async function storeGet(key){
   try{
@@ -848,8 +848,17 @@ async function verifyRepair(id, type, note){
 /* ============================= SETTINGS ACTIONS ============================= */
 async function saveWebhook(){
   const role = state.ui.newWebhookRole;
+  const prevUrl = state.config.lineWebhooks[role];
   state.config.lineWebhooks[role] = state.ui.newWebhookUrl.trim();
-  await storeSet('config', state.config);
+  // เดิม storeSet() ไม่เคยเช็คผลลัพธ์ ทำให้โชว์ toast "บันทึกแล้ว" เสมอแม้ POST จะล้มเหลวจริง
+  // (เช่น เน็ตหลุด/deploy สิทธิ์ผิด) ผู้ใช้จึงเข้าใจผิดว่าตั้งค่าสำเร็จทั้งที่ข้อมูลไม่เข้าเซิร์ฟเวอร์เลย
+  const ok = await storeSet('config', state.config);
+  if(!ok){
+    state.config.lineWebhooks[role] = prevUrl;
+    toast('บันทึก Webhook ไม่สำเร็จ (เชื่อมต่อฐานข้อมูลไม่ได้) กรุณาลองใหม่อีกครั้ง', true);
+    render();
+    return;
+  }
   toast('บันทึก Webhook สำหรับ ' + ROLES[role].label + ' แล้ว');
   render();
 }
