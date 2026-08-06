@@ -333,14 +333,15 @@ const APP_URL = 'https://thtwgot-kh.github.io/maintenance-request/';
 const LIFF_ID = '2010789633-I8KJNM4H';
 /* บั๊มเลขนี้ทุกครั้งที่แก้ไข index.html — ใช้เทียบกับไฟล์ล่าสุดบนเซิร์ฟเวอร์เพื่อเตือนแท็บที่เปิดค้าง
    ไว้นานให้รีเฟรช ป้องกันปัญหาแท็บเก่ารันโค้ดที่ล้าสมัย (เช่น ลิงก์แจ้งเตือนที่ยังไม่มี deep link) */
-const APP_VERSION = '2026-07-24.9';
+const APP_VERSION = '2026-08-06.1';
 
 async function storeGet(key){
   try{
     const res = await fetch(API_URL + '?key=' + encodeURIComponent(key));
+    if(!res.ok) throw new Error('HTTP ' + res.status);
     const data = await res.json();
     return data.value ? JSON.parse(data.value) : null;
-  }catch(e){ return null; }
+  }catch(e){ console.error('storage get failed', key, e); return undefined; }
 }
 async function getUserRoles(userId){
   try{
@@ -394,7 +395,10 @@ async function loadAll(){
   state.orders = orders || [];
   state.notifications = notifs || [];
   state.loaded = true;
-  if(!cfg) await storeSet('config', state.config);
+  // เขียน config เริ่มต้นกลับไปเฉพาะตอนเซิร์ฟเวอร์ตอบว่า "ยังไม่มี config เลยจริงๆ" (cfg === null)
+  // ห้ามเขียนทับตอนแค่ดึงข้อมูลไม่สำเร็จ (cfg === undefined เช่น deploy ใหม่ยังไม่พร้อม/เน็ตหลุด)
+  // มิฉะนั้นจะเผลอเขียนทับ config จริงบนเซิร์ฟเวอร์ (เช่น lineWebhooks ที่ตั้งไว้) ด้วยค่า default ว่างๆ
+  if(cfg === null) await storeSet('config', state.config);
 }
 
 /* ============================= UTIL ============================= */
