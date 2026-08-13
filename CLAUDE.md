@@ -47,6 +47,43 @@ things before by deleting helper functions).
   Script gets redeployed to a new URL.
 - `state` is a single global object; `render()` rebuilds `#app` via
   `innerHTML` on every change (no virtual DOM).
+- **Login & access control — no LINE login at all.** The app used to gate
+  entry behind LINE LIFF (`liff.init`/`liff.login`). That was removed: the
+  LINE Login channel sits in **"Developing"** status, which silently limits
+  successful logins to the channel's own admin/tester accounts, so *every*
+  other employee got either a native `เกิดข้อผิดพลาดที่ไม่ทราบสาเหตุ` alert
+  (Android), a 404 (iOS), or the `access.line.me` email/password form —
+  a password almost nobody has ever set. Publishing the channel was judged
+  more trouble than it was worth. **Do not reintroduce a LIFF gate** unless
+  that channel is actually published first.
+  - Identity is now a **device id**: `D-<24 random base36 chars>` generated
+    on first visit and persisted in `localStorage` under `mtDeviceId`
+    (`getDeviceId()`). It is a bearer credential — whoever holds the string
+    holds the access.
+  - A user's roles are the **union of two sources** (`resolveAccess()`):
+    the `สิทธิ์ผู้ใช้ LINE` sheet tab (server-side exact-match lookup via
+    the unchanged `doGet('userRoles', <deviceId>)`), and their own approved
+    row in the `accessRequests` KV key. Unknown role strings are filtered
+    against `ROLES` so a typo in the sheet can't white-screen the app.
+  - Unknown visitors are not blocked, they get a **"ขอสิทธิ์เข้าใช้งาน"**
+    form (name / department / requested role / note; picking `tech` forces
+    a technician-name choice so it matches the **ช่าง** tab exactly). That
+    writes a `pending` entry to `accessRequests` and fires
+    `tryLineWebhook('admin', ...)`. They then sit on a waiting screen that
+    re-checks every 7s and `location.reload()`s itself the moment an admin
+    approves — no second login, no re-scan, nothing to re-enter.
+  - `admin` approves/rejects in **ตั้งค่าข้อมูลหลัก → คำขอสิทธิ์เข้าใช้งาน**,
+    choosing the role to grant (which can differ from the one requested).
+    A count badge sits on the settings tab while requests are pending.
+  - **Only a `didHash` (sha256 of the device id) is ever stored server-side,
+    never the raw id** — the whole `accessRequests` list is world-readable
+    through the open Apps Script endpoint, so storing raw ids would let any
+    user copy another's credential into `localStorage` and impersonate them.
+    Keep it that way: the raw device id must stay client-side only.
+  - Bootstrapping the first `admin` is the one manual step: the guest and
+    waiting screens both expose that browser's own device id with a copy
+    button, to be pasted by hand into `สิทธิ์ผู้ใช้ LINE` as
+    `D-... | admin | <name>`.
 - **Focus preservation:** because `render()` destroys/recreates every DOM
   node, any input that re-renders on `oninput` would normally lose focus
   after one keystroke. Fixed via a `data-fid="..."` attribute on such
@@ -78,7 +115,8 @@ access: Anyone**) at the URL in `API_URL`.
 Two-tier storage model:
 
 - **KV sheet** (`KV` tab): generic key→JSON-string store. Keys in use:
-  `orders`, `counters`, `notifications`, `photos:<id>`, `lineWebhooks`. This
+  `orders`, `counters`, `notifications`, `photos:<id>`, `lineWebhooks`,
+  `accessRequests`, `lineUsers`, `lineUserRoles`. This
   is the literal backing store for `storeGet`/`storeSet` in the client for
   everything except `config`.
 - **`config` is special and bidirectional:** departments/machines/
@@ -108,6 +146,13 @@ Two-tier storage model:
 - **`สิทธิ์ผู้ใช้ LINE` tab (columns: `userId | บทบาท | ชื่อ`)** — controls
   who can log into the app and which role(s) they see. One row per
   (userId, role) pair; a person with multiple roles gets multiple rows.
+  Despite the tab name it is **no longer LINE-specific**: the `userId`
+  column now holds whatever identity string the client presents, which
+  since the LIFF removal (see "Login & access control" above) is a
+  **device id** of the form `D-<random>`. Hand-typing a row here is still
+  the only way to create the *first* `admin`, and remains a valid way to
+  grant any role permanently. Old `U...` LINE rows are inert — nothing
+  presents a LINE userId to `doGet('userRoles')` any more.
   The 3rd column (`ชื่อ`) is free-text on every row (handy for the admin to
   see who's who at a glance) but the app only *reads* it on rows where
   บทบาท = `tech` — there it must exactly match a name in the **ช่าง** tab,
@@ -182,6 +227,23 @@ Behavior:
     falls back to whichever webhook URL *is* configured (they're always the
     same "LineOA MT" `/exec` URL in practice), so technician names never
     need their own row in the Settings → LINE Webhook table.
+  - `tryLineWebhook` now also posts a **`userIds` array** alongside
+    `role`/`message`, resolved client-side from the `lineUserRoles` KV map
+    that `admin` fills in via **ตั้งค่าข้อมูลหลัก → กำหนดบทบาทผู้ใช้ LINE
+    ที่ทักเข้ามา** (that screen lists the `lineUsers` KV entries and lets
+    admin attach a role — and for `tech`, a technician name — to each LINE
+    userId, replacing hand-editing the `แจ้งเตือน LINE - ผู้รับ` tab).
+    **The relay script does not read `userIds` yet** — it still resolves
+    recipients from that sheet tab and broadcasts when a role has no row,
+    so this field is currently inert and harmless. To make routing precise,
+    the relay's `doPost` needs a one-time hand edit: when `body.userIds` is
+    a non-empty array, push to exactly those ids and skip both the sheet
+    lookup and the broadcast fallback.
+  - Nothing populates the `lineUsers` KV key automatically yet either — the
+    relay logs followers to the **`LINE Users`** sheet tab only. Until it
+    also mirrors them into KV (or the main script exposes that tab via a
+    `doGet('lineUsers')` branch), admin adds people on that screen by
+    pasting a userId + name copied out of the `LINE Users` tab.
 
 ## Git workflow used throughout this project
 
@@ -220,6 +282,16 @@ in git.
   risk.
 
 ## Where things stood at hand-off
+
+- **Access control was rebuilt off LINE entirely** — see "Login & access
+  control" under `index.html` above for the whole design and the reasons.
+  Short version: anyone with the app link can open it in any browser, ask
+  for access, and an `admin` grants a role in-app; LIFF is gone. The only
+  remaining manual steps are seeding the first `admin` row in the sheet,
+  and the two relay-script edits noted in the "LineOA MT" section (honour
+  `userIds`, mirror followers into the `lineUsers` KV key) — both optional,
+  both purely about making LINE notifications land on the right person
+  instead of broadcasting.
 
 - Core workflow (submit → FM approve → GM approve → assign → in-progress →
   done), Sheets persistence, near-real-time polling, and the simplified
