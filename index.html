@@ -237,7 +237,6 @@
 <div id="app">กำลังตรวจสอบสิทธิ์ผู้ใช้งาน…</div>
 <div class="toast-wrap" id="toastWrap"></div>
 
-<script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
 <script>
 /* ============================= CONFIG / CONSTANTS ============================= */
 const ROLES = {
@@ -308,8 +307,13 @@ let state = {
   allowedRoles: [],
   myTechName: '',
   techIdentities: [],
-  lineUserId: null,
-  authStatus: 'loading', // loading | denied | ok
+  deviceId: null,   // รหัสประจำเครื่อง/เบราว์เซอร์ ใช้แทน LINE userId เป็นตัวระบุตัวตน
+  didHash: '',      // ลายนิ้วมือ (sha256) ของ deviceId — ใช้เป็นคีย์ค้นสิทธิ์ในคำขอที่อนุมัติแล้ว
+  accessRequests: [],
+  myRequest: null,
+  lineUsers: [],       // ผู้ใช้ LINE ที่ทักเข้ามาหา OA (มาจากแท็บ "LINE Users" ในชีต)
+  lineUserRoles: {},   // userId -> { name, roles:[], techName } กำหนดโดย admin ในหน้าตั้งค่า
+  authStatus: 'loading', // loading | guest | pending | rejected | ok
   view: 'new',
   config: { departments: DEPT_DEFAULT, machines: MACHINES_DEFAULT, technicians: TECH_DEFAULT, lineWebhooks:{} },
   counters: {},
@@ -323,17 +327,23 @@ let state = {
   filterStatus: 'ALL',
   filterDept: 'ALL',
   updateAvailable: false,
-  ui: { actionFor:null, actionType:null, actionNote:'', resubmitPhotos:[], assignTechs:[''], assignStartDate:'', assignEndDate:'', assignReceivedBy:'', assignExecutionPlan:'', maintRecordFor:null, maintRecordCause:'', maintRecordOpinion:'', maintRecordParts:[emptyPartRow()], newWebhookRole:'fm', newWebhookUrl:'', resetConfirming:false, resetConfirmText:'' },
+  ui: { actionFor:null, actionType:null, actionNote:'', resubmitPhotos:[], assignTechs:[''], assignStartDate:'', assignEndDate:'', assignReceivedBy:'', assignExecutionPlan:'', maintRecordFor:null, maintRecordCause:'', maintRecordOpinion:'', maintRecordParts:[emptyPartRow()], newWebhookRole:'fm', newWebhookUrl:'', resetConfirming:false, resetConfirmText:'',
+    reqName:'', reqDept:'', reqRole:'requester', reqTechName:'', reqNote:'', reqSending:false,
+    grantRole:{}, grantTechName:{},
+    lineRole:{}, lineTechName:{}, lineName:{}, newLineUserId:'', newLineUserName:'' },
 };
 
 /* ============================= STORAGE HELPERS (Google Sheets via Apps Script) ============================= */
 const API_URL = 'https://script.google.com/macros/s/AKfycbyJFozkOTsGdJGMjWfYAFT2riy_i94ap1dJKqK77QHintDQEcXPxAdv6140ZAaVPa5srA/exec';
 const SHEET_URL = 'https://docs.google.com/spreadsheets/d/1er3WPCHJmV8_lioD-9gShr5mWDaajvXEYrEaaV-_p-k/edit';
 const APP_URL = 'https://thtwgot-kh.github.io/maintenance-request/';
-const LIFF_ID = '2010789633-I8KJNM4H';
+/* คีย์ใน localStorage ที่เก็บ "รหัสประจำเครื่อง" — ตัวระบุตัวตนของผู้ใช้แทน LINE userId
+   (เดิมระบบบังคับล็อกอินผ่าน LINE LIFF ซึ่งใช้ได้เฉพาะเจ้าของ/ผู้ทดสอบของ LINE Login channel
+   ที่ยังอยู่สถานะ Developing เท่านั้น ทำให้พนักงานคนอื่นเข้าไม่ได้เลย จึงเลิกใช้ LIFF ทั้งหมด) */
+const DEVICE_ID_KEY = 'mtDeviceId';
 /* บั๊มเลขนี้ทุกครั้งที่แก้ไข index.html — ใช้เทียบกับไฟล์ล่าสุดบนเซิร์ฟเวอร์เพื่อเตือนแท็บที่เปิดค้าง
    ไว้นานให้รีเฟรช ป้องกันปัญหาแท็บเก่ารันโค้ดที่ล้าสมัย (เช่น ลิงก์แจ้งเตือนที่ยังไม่มี deep link) */
-const APP_VERSION = '2026-08-06.2';
+const APP_VERSION = '2026-08-13.1';
 
 async function storeGet(key){
   try{
@@ -350,28 +360,209 @@ async function getUserRoles(userId){
     return data.value ? JSON.parse(data.value) : { roles:[], techNames:[] };
   }catch(e){ return { roles:[], techNames:[] }; }
 }
-/* บทบาทถูกผูกกับ LINE userId ของผู้ใช้เสมอ — ต้องเปิดผ่าน LINE (หรือผ่านลิงก์ LIFF) และมีชื่ออยู่ใน
-   ชีต "สิทธิ์ผู้ใช้ LINE" เท่านั้นถึงจะเข้าใช้งานได้ ผู้ใช้ที่ไม่มีสิทธิ์หรือเปิดนอก LINE จะถูกบล็อก */
-async function authenticate(){
-  if(!LIFF_ID){ state.authStatus = 'denied'; return; }
-  try{
-    await liff.init({ liffId: LIFF_ID });
-    if(!liff.isLoggedIn()){ liff.login(); return; } // จะ redirect ออกจากหน้านี้
-    const profile = await liff.getProfile();
-    state.lineUserId = profile.userId;
-  }catch(e){
-    state.authStatus = 'denied';
-    return;
+/* ============================= IDENTITY & ACCESS (ไม่ต้องล็อกอิน LINE) =============================
+   ใครก็เปิดลิงก์แอปนี้จากเบราว์เซอร์อะไรก็ได้ แล้ว "ขอสิทธิ์" ในหน้าแรก → ผู้ดูแลระบบ (admin) กดอนุมัติ
+   และเลือกบทบาทให้ → ผู้ขอเข้าใช้งานได้เองภายในไม่กี่วินาที โดยไม่ต้องล็อกอินซ้ำ
+
+   บทบาทของผู้ใช้หนึ่งคนมาจาก 2 แหล่งรวมกัน (union) — ใช้แหล่งไหนก็ได้:
+   1) ชีต "สิทธิ์ผู้ใช้ LINE" (คอลัมน์ userId | บทบาท | ชื่อ) — ผู้ดูแลพิมพ์แถวเองใน Google Sheet
+      โดยใส่ "รหัสประจำเครื่อง" (ขึ้นต้นด้วย D-) ลงคอลัมน์ userId ได้ตรงๆ ค้นหาฝั่งเซิร์ฟเวอร์
+      ผ่าน doGet('userRoles', ...) เหมือนเดิม (ไม่ต้องแก้ Apps Script)
+   2) คำขอสิทธิ์ที่ admin อนุมัติในแอป (KV key 'accessRequests') — กดอนุมัติในหน้าตั้งค่าได้เลย
+
+   หมายเหตุความปลอดภัย: ในคำขอที่เก็บบนเซิร์ฟเวอร์จะบันทึกเฉพาะ "ลายนิ้วมือ" (sha256) ของรหัส
+   ประจำเครื่อง ไม่เก็บรหัสตัวจริง เพื่อไม่ให้ผู้ใช้คนอื่นอ่านรายการคำขอแล้วนำรหัสของคนอื่นไปสวมสิทธิ์ */
+function randomToken(len){
+  const bytes = new Uint8Array(len);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes).map(b => b.toString(36).padStart(2,'0')).join('').slice(0, len);
+}
+function getDeviceId(){
+  let id = null;
+  try{ id = localStorage.getItem(DEVICE_ID_KEY); }catch(e){ /* โหมดส่วนตัว/บล็อกคุกกี้ */ }
+  if(!id){
+    id = 'D-' + randomToken(24);
+    try{ localStorage.setItem(DEVICE_ID_KEY, id); }catch(e){ /* เก็บไม่ได้ = ต้องขอสิทธิ์ใหม่ทุกครั้ง */ }
   }
-  const result = await getUserRoles(state.lineUserId);
-  const roles = result.roles || [];
-  if(!roles.length){ state.authStatus = 'denied'; return; }
-  state.allowedRoles = [...new Set(roles)];
-  state.role = roles[0];
-  // รองรับทั้งรูปแบบใหม่ (techNames: อาเรย์) และรูปแบบเก่า (techName: string เดี่ยว)
-  state.techIdentities = result.techNames || (result.techName ? [result.techName] : []);
+  return id;
+}
+async function sha256Hex(str){
+  if(!crypto.subtle) return '';   // ต้องเป็น https เท่านั้น (GitHub Pages เป็น https อยู่แล้ว)
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,'0')).join('');
+}
+function requestFor(hash, list){
+  if(!hash) return null;
+  return (list || []).find(r => r.didHash === hash) || null;
+}
+/* รวมบทบาทจากชีต + จากคำขอที่อนุมัติแล้ว แล้วตัดสินว่าเข้าใช้งานได้หรือยัง */
+async function resolveAccess(){
+  const [sheet, requests] = await Promise.all([
+    getUserRoles(state.deviceId),
+    storeGet('accessRequests'),
+  ]);
+  state.accessRequests = Array.isArray(requests) ? requests : [];
+  const mine = requestFor(state.didHash, state.accessRequests);
+  state.myRequest = mine;
+
+  const roles = [...(sheet.roles || [])];
+  const techNames = [...(sheet.techNames || (sheet.techName ? [sheet.techName] : []))];
+  if(mine && mine.status === 'approved'){
+    (mine.roles || []).forEach(r => roles.push(r));
+    if(mine.techName) techNames.push(mine.techName);
+  }
+  // กรองเฉพาะบทบาทที่ระบบรู้จักจริง — พิมพ์ชื่อบทบาทผิดในชีต (เช่น "Tech") จะได้ไม่ทำให้แอปพัง
+  state.allowedRoles = [...new Set(roles.filter(r => ROLES[r]))];
+  state.techIdentities = [...new Set(techNames)];
   state.myTechName = state.techIdentities[0] || '';
-  state.authStatus = 'ok';
+  if(state.allowedRoles.length){
+    state.role = state.allowedRoles[0];
+    state.authStatus = 'ok';
+  } else if(mine && mine.status === 'pending'){
+    state.authStatus = 'pending';
+  } else if(mine && mine.status === 'rejected'){
+    state.authStatus = 'rejected';
+  } else {
+    state.authStatus = 'guest';
+  }
+}
+async function authenticate(){
+  state.deviceId = getDeviceId();
+  state.didHash = await sha256Hex(state.deviceId);
+  // หน้าขอสิทธิ์ต้องใช้รายชื่อแผนก/ช่าง และ URL แจ้งเตือน LINE ของ admin จึงต้องโหลด config ก่อนด้วย
+  const cfg = await storeGet('config');
+  if(cfg) state.config = Object.assign({}, state.config, cfg);
+  if(!state.config.lineWebhooks) state.config.lineWebhooks = {};
+  await resolveAccess();
+}
+/* ระหว่างรอผู้ดูแลอนุมัติ ให้เช็คสิทธิ์ซ้ำเป็นระยะ พออนุมัติแล้วจะเข้าระบบให้เองโดยผู้ใช้ไม่ต้องทำอะไร */
+async function recheckAccess(){
+  if(state.authStatus === 'ok') return;
+  const before = state.authStatus;
+  await resolveAccess();
+  if(state.authStatus === 'ok'){ location.reload(); return; }
+  if(state.authStatus !== before) render();
+}
+/* เขียนรายการคำขอแบบดึงของล่าสุดมาก่อนเสมอ ลดโอกาสที่สองคนกดพร้อมกันแล้วทับกันเอง */
+async function saveAccessRequests(mutate){
+  const latest = await storeGet('accessRequests');
+  const list = (Array.isArray(latest) ? latest : state.accessRequests).slice();
+  const next = mutate(list);
+  if(!next) return false;
+  const ok = await storeSet('accessRequests', next);
+  if(ok) state.accessRequests = next;
+  return ok;
+}
+async function submitAccessRequest(){
+  const u = state.ui;
+  const name = (u.reqName || '').trim();
+  if(!name){ toast('กรุณากรอกชื่อ-นามสกุล', true); return; }
+  if(!ROLES[u.reqRole] || u.reqRole === 'admin'){ toast('กรุณาเลือกบทบาทที่ต้องการ', true); return; }
+  if(u.reqRole === 'tech' && !u.reqTechName){ toast('กรุณาเลือกชื่อช่างของท่าน', true); return; }
+  if(!state.didHash){ toast('เบราว์เซอร์นี้ไม่รองรับการขอสิทธิ์ กรุณาใช้เบราว์เซอร์อื่น', true); return; }
+  const entry = {
+    id: uid(), didHash: state.didHash, name,
+    dept: u.reqDept || '',
+    requestedRole: u.reqRole,
+    requestedTechName: u.reqRole === 'tech' ? u.reqTechName : '',
+    note: (u.reqNote || '').trim(),
+    roles: [], techName: '', status: 'pending',
+    at: nowIso(), decidedAt: '', decidedBy: '',
+  };
+  u.reqSending = true; render();
+  const ok = await saveAccessRequests(list => {
+    const idx = list.findIndex(r => r.didHash === state.didHash);
+    if(idx >= 0) list[idx] = entry; else list.push(entry);
+    return list;
+  });
+  u.reqSending = false;
+  if(!ok){ toast('ส่งคำขอไม่สำเร็จ กรุณาลองใหม่', true); render(); return; }
+  state.myRequest = entry;
+  state.authStatus = 'pending';
+  render();
+  toast('ส่งคำขอเรียบร้อย รอผู้ดูแลอนุมัติ');
+  await tryLineWebhook('admin',
+    `🔐 มีคำขอสิทธิ์เข้าใช้งานใหม่\n` +
+    `ชื่อ: ${name}\n` +
+    `แผนก: ${entry.dept || '-'}\n` +
+    `บทบาทที่ขอ: ${ROLES[entry.requestedRole].label}` +
+    (entry.requestedTechName ? `\nชื่อช่าง: ${entry.requestedTechName}` : '') +
+    (entry.note ? `\nหมายเหตุ: ${entry.note}` : '') +
+    `\n\nกดอนุมัติได้ที่หน้า "ตั้งค่าข้อมูลหลัก" → คำขอสิทธิ์เข้าใช้งาน\n${APP_URL}`);
+}
+async function cancelMyAccessRequest(){
+  const ok = await saveAccessRequests(list => list.filter(r => r.didHash !== state.didHash));
+  if(!ok){ toast('ยกเลิกคำขอไม่สำเร็จ', true); return; }
+  const mine = state.myRequest;
+  if(mine){
+    state.ui.reqName = mine.name || '';
+    state.ui.reqDept = mine.dept || '';
+    state.ui.reqRole = mine.requestedRole || 'requester';
+    state.ui.reqTechName = mine.requestedTechName || '';
+    state.ui.reqNote = mine.note || '';
+  }
+  state.myRequest = null;
+  state.authStatus = 'guest';
+  render();
+}
+async function approveAccessRequest(id){
+  const req = state.accessRequests.find(r => r.id === id);
+  if(!req) return;
+  const role = state.ui.grantRole[id] || req.requestedRole;
+  if(!ROLES[role]){ toast('กรุณาเลือกบทบาท', true); return; }
+  // บทบาท tech ต้องผูกกับชื่อช่างที่ตรงกับชีต "ช่าง" เป๊ะๆ ไม่งั้นจะไม่เห็นปุ่มเริ่ม/จบงานของตัวเอง
+  const techName = role === 'tech' ? (state.ui.grantTechName[id] || req.requestedTechName || '') : '';
+  if(role === 'tech' && !techName){ toast('กรุณาเลือกชื่อช่างให้ตรงกับรายชื่อในชีต "ช่าง"', true); return; }
+  const ok = await saveAccessRequests(list => {
+    const t = list.find(r => r.id === id);
+    if(!t) return null;
+    t.status = 'approved'; t.roles = [role]; t.techName = techName;
+    t.decidedAt = nowIso();
+    t.decidedBy = ROLES[state.role] ? ROLES[state.role].label : 'ผู้ดูแลระบบ';
+    return list;
+  });
+  if(!ok){ toast('บันทึกไม่สำเร็จ กรุณาลองใหม่', true); return; }
+  toast(`อนุมัติ ${req.name} เป็น "${ROLES[role].label}" แล้ว`);
+  render();
+}
+async function rejectAccessRequest(id){
+  const req = state.accessRequests.find(r => r.id === id);
+  if(!req) return;
+  if(!confirm(`ปฏิเสธคำขอสิทธิ์ของ "${req.name}" ?`)) return;
+  const ok = await saveAccessRequests(list => {
+    const t = list.find(r => r.id === id);
+    if(!t) return null;
+    t.status = 'rejected'; t.roles = []; t.techName = '';
+    t.decidedAt = nowIso();
+    t.decidedBy = ROLES[state.role] ? ROLES[state.role].label : 'ผู้ดูแลระบบ';
+    return list;
+  });
+  if(!ok){ toast('บันทึกไม่สำเร็จ กรุณาลองใหม่', true); return; }
+  toast('ปฏิเสธคำขอแล้ว');
+  render();
+}
+async function revokeAccessRequest(id){
+  const req = state.accessRequests.find(r => r.id === id);
+  if(!req) return;
+  if(!confirm(`ถอนสิทธิ์และลบรายการของ "${req.name}" ?\n\nผู้ใช้รายนี้จะกลับไปอยู่ในสถานะยังไม่มีสิทธิ์ และขอสิทธิ์ใหม่ได้`)) return;
+  const ok = await saveAccessRequests(list => list.filter(r => r.id !== id));
+  if(!ok){ toast('ลบไม่สำเร็จ กรุณาลองใหม่', true); return; }
+  toast('ลบรายการแล้ว');
+  render();
+}
+async function copyText(text, okMsg){
+  try{
+    await navigator.clipboard.writeText(text);
+    toast(okMsg || 'คัดลอกแล้ว');
+  }catch(e){
+    // สำรองสำหรับเบราว์เซอร์/บริบทที่ยังไม่รองรับ Clipboard API
+    const ta = document.createElement('textarea');
+    ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select();
+    try{ document.execCommand('copy'); toast(okMsg || 'คัดลอกแล้ว'); }
+    catch(e2){ toast('คัดลอกไม่สำเร็จ กรุณาคัดลอกด้วยตัวเอง', true); }
+    ta.remove();
+  }
 }
 async function storeSet(key, val){
   try{
@@ -386,14 +577,17 @@ async function storeSet(key, val){
 }
 
 async function loadAll(){
-  const [cfg, counters, orders, notifs] = await Promise.all([
-    storeGet('config'), storeGet('counters'), storeGet('orders'), storeGet('notifications')
+  const [cfg, counters, orders, notifs, lineUsers, lineUserRoles] = await Promise.all([
+    storeGet('config'), storeGet('counters'), storeGet('orders'), storeGet('notifications'),
+    storeGet('lineUsers'), storeGet('lineUserRoles')
   ]);
   state.config = cfg || state.config;
   if(!state.config.lineWebhooks) state.config.lineWebhooks = {};
   state.counters = counters || {};
   state.orders = orders || [];
   state.notifications = notifs || [];
+  state.lineUsers = Array.isArray(lineUsers) ? lineUsers : [];
+  state.lineUserRoles = (lineUserRoles && typeof lineUserRoles === 'object') ? lineUserRoles : {};
   state.loaded = true;
   // เขียน config เริ่มต้นกลับไปเฉพาะตอนเซิร์ฟเวอร์ตอบว่า "ยังไม่มี config เลยจริงๆ" (cfg === null)
   // ห้ามเขียนทับตอนแค่ดึงข้อมูลไม่สำเร็จ (cfg === undefined เช่น deploy ใหม่ยังไม่พร้อม/เน็ตหลุด)
@@ -445,12 +639,24 @@ function toast(msg, isErr){
   wrap.appendChild(el);
   setTimeout(()=>{ el.style.opacity='0'; el.style.transition='opacity .3s'; setTimeout(()=>el.remove(),300); }, 2600);
 }
+/* หา LINE userId ของผู้รับสำหรับบทบาทหนึ่งๆ จากตารางที่ admin กำหนดไว้ในหน้าตั้งค่า
+   รองรับทั้งบทบาทของระบบ (fm/gm/maint/tech/requester/admin) และ "ชื่อช่าง" ที่ใช้ยิงปิงส่วนตัว */
+function lineRecipientsForRole(role){
+  const map = state.lineUserRoles || {};
+  return Object.keys(map).filter(userId => {
+    const m = map[userId] || {};
+    return (m.roles || []).includes(role) || (m.techName && m.techName === role);
+  });
+}
 async function tryLineWebhook(role, message){
   const hooks = state.config.lineWebhooks || {};
   const url = hooks[role] || Object.values(hooks).find(Boolean);
   if(!url) return;
+  // ส่ง userIds ไปด้วยเพื่อให้สคริปต์ LINE relay ยิงตรงถึงคนที่ admin กำหนดไว้ได้
+  // (ถ้า relay เวอร์ชันเก่ายังไม่รองรับฟิลด์นี้ ก็จะถูกมองข้ามไปเฉยๆ พฤติกรรมเดิมไม่เปลี่ยน)
+  const userIds = lineRecipientsForRole(role);
   try{
-    await fetch(url, { method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'}, body: JSON.stringify({ role, message, at: nowIso() }) });
+    await fetch(url, { method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'}, body: JSON.stringify({ role, message, userIds, at: nowIso() }) });
   }catch(e){ console.warn('LINE relay webhook not reachable (check URL / CORS):', e); }
 }
 
@@ -960,7 +1166,7 @@ function renderHeader(){
     <button class="${state.view==='new'?'active':''}" onclick="setView('new')">➕ ใบคำร้อง/ใบแจ้งซ่อม</button>
     <button class="${state.view==='list'||state.view==='detail'?'active':''}" onclick="setView('list')">📋 รายการแจ้งซ่อม</button>
     <button class="${state.view==='notif'?'active':''}" onclick="setView('notif')">🔔 การแจ้งเตือน${unreadCountForRole(state.role)>0?`<span class="badge">${unreadCountForRole(state.role)}</span>`:''}</button>
-    ${state.role==='admin' ? `<button class="${state.view==='settings'?'active':''}" onclick="setView('settings')">⚙️ ตั้งค่าข้อมูลหลัก</button>` : ''}
+    ${state.role==='admin' ? `<button class="${state.view==='settings'?'active':''}" onclick="setView('settings')">⚙️ ตั้งค่าข้อมูลหลัก${pendingAccessCount()>0?`<span class="badge">${pendingAccessCount()}</span>`:''}</button>` : ''}
   </nav>`;
 }
 
@@ -1384,14 +1590,199 @@ function renderNotif(){
 }
 
 /* ============================= RENDER: SETTINGS ============================= */
+function setGrantRole(id, v){ state.ui.grantRole[id] = v; render(); }
+function pendingAccessCount(){ return state.accessRequests.filter(r => r.status === 'pending').length; }
+function renderAccessRequests(){
+  const list = state.accessRequests.slice().sort((a,b) => String(b.at).localeCompare(String(a.at)));
+  const pending = list.filter(r => r.status === 'pending');
+  const decided = list.filter(r => r.status !== 'pending');
+  const techOptsFor = (cur) => (state.config.technicians || []).map(t =>
+    `<option value="${escapeHtml(t)}" ${cur === t ? 'selected' : ''}>${escapeHtml(t)}</option>`).join('');
+
+  const pendingCards = pending.map(r => {
+    const role = state.ui.grantRole[r.id] || r.requestedRole;
+    const techName = state.ui.grantTechName[r.id] || r.requestedTechName || '';
+    const roleOpts = Object.keys(ROLES).map(k =>
+      `<option value="${k}" ${role === k ? 'selected' : ''}>${ROLES[k].label}</option>`).join('');
+    return `
+    <div class="reject-box">
+      <div style="display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; align-items:baseline;">
+        <b style="color:var(--navy); font-size:14.5px;">${escapeHtml(r.name)}</b>
+        <span style="font-size:12px; color:var(--slate);">${escapeHtml(fmtDateTime(r.at))}</span>
+      </div>
+      <div style="font-size:13px; color:var(--slate); margin-top:3px;">
+        แผนก: ${escapeHtml(r.dept || '-')} · ขอบทบาท: <b style="color:var(--ink);">${ROLES[r.requestedRole] ? escapeHtml(ROLES[r.requestedRole].label) : escapeHtml(r.requestedRole || '-')}</b>
+        ${r.requestedTechName ? ` · ระบุชื่อช่าง: ${escapeHtml(r.requestedTechName)}` : ''}
+      </div>
+      ${r.note ? `<div style="font-size:13px; margin-top:4px;">หมายเหตุ: ${escapeHtml(r.note)}</div>` : ''}
+      <div style="margin-top:10px;">
+        <label class="field-label">บทบาทที่จะให้</label>
+        <select class="input" onchange="setGrantRole('${r.id}', this.value)">${roleOpts}</select>
+      </div>
+      ${role === 'tech' ? `
+      <div style="margin-top:10px;">
+        <label class="field-label">ชื่อช่าง (ต้องตรงกับชีต "ช่าง") <span class="req-star">*</span></label>
+        <select class="input" onchange="state.ui.grantTechName['${r.id}']=this.value">
+          <option value="">— กรุณาเลือก —</option>
+          ${techOptsFor(techName)}
+        </select>
+      </div>` : ''}
+      <div class="order-actions" style="margin-top:12px;">
+        <button class="btn btn-success btn-sm" onclick="approveAccessRequest('${r.id}')">✓ อนุมัติ</button>
+        <button class="btn btn-danger-outline btn-sm" onclick="rejectAccessRequest('${r.id}')">ปฏิเสธ</button>
+      </div>
+    </div>`;
+  }).join('');
+
+  const decidedRows = decided.map(r => {
+    const granted = (r.roles || []).map(k => ROLES[k] ? ROLES[k].label : k).join(', ');
+    const pill = r.status === 'approved'
+      ? `<span class="status-pill" style="color:#2F8F6B; background:#e6f3ee;">อนุมัติแล้ว</span>`
+      : `<span class="status-pill" style="color:#B5433A; background:#fbeae8;">ปฏิเสธ</span>`;
+    return `<tr>
+      <td>${escapeHtml(r.name)}${r.techName ? `<div style="font-size:11.5px; color:var(--slate);">${escapeHtml(r.techName)}</div>` : ''}</td>
+      <td>${escapeHtml(r.dept || '-')}</td>
+      <td>${pill}${granted ? ` <span style="font-size:12px;">${escapeHtml(granted)}</span>` : ''}</td>
+      <td><button class="del" onclick="revokeAccessRequest('${r.id}')">ถอนสิทธิ์/ลบ</button></td>
+    </tr>`;
+  }).join('');
+
+  return `
+  <div class="settings-section card">
+    <h3>คำขอสิทธิ์เข้าใช้งาน ${pending.length ? `<span class="status-pill" style="color:var(--navy); background:var(--amber);">${pending.length} รายการใหม่</span>` : ''}</h3>
+    <p class="desc">ผู้ใช้ที่ยังไม่มีสิทธิ์จะเห็นหน้า "ขอสิทธิ์เข้าใช้งาน" เมื่อเปิดลิงก์แอป เมื่อส่งคำขอเข้ามา ระบบจะแจ้งเตือนไปที่ LINE ของผู้ดูแล — กดอนุมัติที่นี่แล้วผู้ขอจะเข้าใช้งานได้เองภายในไม่กี่วินาที</p>
+    ${pending.length ? pendingCards : `<p class="desc" style="margin:0;">ไม่มีคำขอที่รออนุมัติ</p>`}
+    ${decided.length ? `
+    <h3 style="margin-top:20px;">ผู้ใช้ที่พิจารณาแล้ว</h3>
+    <table class="mini">
+      <tr><th>ชื่อ</th><th>แผนก</th><th>สถานะ / บทบาท</th><th></th></tr>
+      ${decidedRows}
+    </table>
+    <p class="desc" style="margin:10px 0 0; font-size:12px;">หมายเหตุ: ผู้ใช้ที่ผู้ดูแลพิมพ์แถวไว้ในชีต <b>สิทธิ์ผู้ใช้ LINE</b> เองจะไม่แสดงในตารางนี้ — จัดการได้ที่ชีตโดยตรง</p>` : ''}
+  </div>
+  `;
+}
+
+/* ============================= ADMIN: กำหนดบทบาทให้ผู้ใช้ LINE ============================= */
+async function saveLineUserRole(userId){
+  const id = String(userId || '').trim();
+  if(!id){ toast('ไม่พบ LINE userId', true); return; }
+  const cur = state.lineUserRoles[id] || {};
+  const role = state.ui.lineRole[id] !== undefined ? state.ui.lineRole[id] : ((cur.roles || [])[0] || '');
+  const techName = state.ui.lineTechName[id] !== undefined ? state.ui.lineTechName[id] : (cur.techName || '');
+  if(role && !ROLES[role]){ toast('บทบาทไม่ถูกต้อง', true); return; }
+  if(role === 'tech' && !techName){ toast('กรุณาเลือกชื่อช่างให้ตรงกับชีต "ช่าง"', true); return; }
+  const known = state.lineUsers.find(u => u.userId === id);
+  const next = Object.assign({}, state.lineUserRoles);
+  if(!role){
+    delete next[id];   // ไม่เลือกบทบาท = ยกเลิกการกำหนด
+  } else {
+    next[id] = {
+      name: (state.ui.lineName[id] || cur.name || (known && known.displayName) || '').trim(),
+      roles: [role],
+      techName: role === 'tech' ? techName : '',
+    };
+  }
+  if(!await storeSet('lineUserRoles', next)){ toast('บันทึกไม่สำเร็จ กรุณาลองใหม่', true); return; }
+  state.lineUserRoles = next;
+  toast(role ? `กำหนด "${ROLES[role].label}" แล้ว` : 'ยกเลิกการกำหนดบทบาทแล้ว');
+  render();
+}
+async function addLineUserManually(){
+  const id = (state.ui.newLineUserId || '').trim();
+  const name = (state.ui.newLineUserName || '').trim();
+  if(!id){ toast('กรุณากรอก LINE userId', true); return; }
+  if(state.lineUsers.some(u => u.userId === id)){ toast('มีผู้ใช้รายนี้ในรายการอยู่แล้ว', true); return; }
+  const next = state.lineUsers.concat([{ userId:id, displayName:name || '(เพิ่มด้วยตัวเอง)', lastSeen:nowIso() }]);
+  if(!await storeSet('lineUsers', next)){ toast('บันทึกไม่สำเร็จ กรุณาลองใหม่', true); return; }
+  state.lineUsers = next;
+  state.ui.newLineUserId = ''; state.ui.newLineUserName = '';
+  toast('เพิ่มผู้ใช้ LINE แล้ว — เลือกบทบาทให้เขาได้เลย');
+  render();
+}
+function setLineRole(userId, v){ state.ui.lineRole[userId] = v; render(); }
+function renderLineUserRoles(){
+  // รวมคนที่ทักเข้ามา (แท็บ LINE Users) กับคนที่ถูกกำหนดบทบาทไว้แล้ว เผื่อบางรายไม่อยู่ในรายการที่ทักเข้ามา
+  const ids = [...new Set(state.lineUsers.map(u => u.userId).concat(Object.keys(state.lineUserRoles)))];
+  const techOptsFor = (cur) => (state.config.technicians || []).map(t =>
+    `<option value="${escapeHtml(t)}" ${cur === t ? 'selected' : ''}>${escapeHtml(t)}</option>`).join('');
+
+  const rows = ids.map(id => {
+    const known = state.lineUsers.find(u => u.userId === id) || {};
+    const cur = state.lineUserRoles[id] || {};
+    const role = state.ui.lineRole[id] !== undefined ? state.ui.lineRole[id] : ((cur.roles || [])[0] || '');
+    const techName = state.ui.lineTechName[id] !== undefined ? state.ui.lineTechName[id] : (cur.techName || '');
+    const roleOpts = Object.keys(ROLES).map(k =>
+      `<option value="${k}" ${role === k ? 'selected' : ''}>${ROLES[k].label}</option>`).join('');
+    const assigned = (cur.roles || [])[0];
+    return `
+    <div class="reject-box">
+      <div style="display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; align-items:baseline;">
+        <b style="color:var(--navy); font-size:14.5px;">${escapeHtml(known.displayName || cur.name || '(ไม่ทราบชื่อ)')}</b>
+        ${assigned
+          ? `<span class="status-pill" style="color:#2F8F6B; background:#e6f3ee;">${escapeHtml(ROLES[assigned] ? ROLES[assigned].label : assigned)}${cur.techName ? ' — ' + escapeHtml(cur.techName) : ''}</span>`
+          : `<span class="status-pill" style="color:#6b7785; background:#eef0f2;">ยังไม่กำหนดบทบาท</span>`}
+      </div>
+      <div class="mono" style="font-size:11px; color:var(--slate); margin-top:3px; word-break:break-all;">${escapeHtml(id)}</div>
+      ${known.lastSeen ? `<div style="font-size:12px; color:var(--slate);">ทักเข้ามาล่าสุด: ${escapeHtml(String(known.lastSeen))}</div>` : ''}
+      <div style="margin-top:10px;">
+        <label class="field-label">ชื่อที่ใช้แสดงในระบบ</label>
+        <input class="input" data-fid="lineName-${escapeHtml(id)}" value="${escapeHtml(state.ui.lineName[id] !== undefined ? state.ui.lineName[id] : (cur.name || known.displayName || ''))}" oninput="state.ui.lineName['${escapeHtml(id)}']=this.value" placeholder="ชื่อ-นามสกุล">
+      </div>
+      <div style="margin-top:10px;">
+        <label class="field-label">บทบาท</label>
+        <select class="input" onchange="setLineRole('${escapeHtml(id)}', this.value)">
+          <option value="" ${role === '' ? 'selected' : ''}>— ไม่กำหนด —</option>
+          ${roleOpts}
+        </select>
+      </div>
+      ${role === 'tech' ? `
+      <div style="margin-top:10px;">
+        <label class="field-label">ชื่อช่าง (ต้องตรงกับชีต "ช่าง") <span class="req-star">*</span></label>
+        <select class="input" onchange="state.ui.lineTechName['${escapeHtml(id)}']=this.value">
+          <option value="">— กรุณาเลือก —</option>
+          ${techOptsFor(techName)}
+        </select>
+      </div>` : ''}
+      <div class="order-actions" style="margin-top:12px;">
+        <button class="btn btn-success btn-sm" onclick="saveLineUserRole('${escapeHtml(id)}')">บันทึกบทบาท</button>
+      </div>
+    </div>`;
+  }).join('');
+
+  return `
+  <div class="settings-section card">
+    <h3>กำหนดบทบาทผู้ใช้ LINE ที่ทักเข้ามา</h3>
+    <p class="desc">กำหนดว่าผู้ใช้ LINE แต่ละคนเป็นบทบาทไหน เพื่อให้ <b>การแจ้งเตือนทาง LINE</b> ของบทบาทนั้นส่งตรงถึงคนที่ถูกต้อง (แทนการกระจายให้เพื่อนทุกคนใน OA) — ส่วนสิทธิ์ <b>เข้าใช้งานแอป</b> อนุมัติที่หัวข้อ "คำขอสิทธิ์เข้าใช้งาน" ด้านบน</p>
+    ${ids.length ? rows : `<p class="desc" style="margin:0;">ยังไม่มีผู้ใช้ LINE ในรายการ — ให้แต่ละคนทักแชทหา LINE OA หนึ่งครั้ง แล้วนำ userId จากแท็บ <b>LINE Users</b> ในชีตมาเพิ่มด้านล่าง</p>`}
+    <h3 style="margin-top:20px;">เพิ่มผู้ใช้ LINE ด้วยตัวเอง</h3>
+    <p class="desc">คัดลอก userId จากแท็บ <b>LINE Users</b> ในชีต (คนที่ทักแชทหา OA แล้วจะถูกบันทึกไว้ที่นั่นอัตโนมัติ)</p>
+    <div class="inline-form">
+      <input class="input mono" data-fid="newLineUserId" style="font-size:12px;" value="${escapeHtml(state.ui.newLineUserId)}" oninput="state.ui.newLineUserId=this.value" placeholder="U1234567890abcdef...">
+      <input class="input" data-fid="newLineUserName" value="${escapeHtml(state.ui.newLineUserName)}" oninput="state.ui.newLineUserName=this.value" placeholder="ชื่อ-นามสกุล">
+      <button class="btn btn-outline btn-sm" onclick="addLineUserManually()">เพิ่ม</button>
+    </div>
+    <div class="summary-link" style="margin-top:12px;">
+      <div class="txt">เปิดแท็บ <b>LINE Users</b> เพื่อดู userId ของคนที่ทักเข้ามา</div>
+      <a href="${SHEET_URL}" target="_blank" rel="noopener">เปิด Sheet →</a>
+    </div>
+  </div>
+  `;
+}
+
 function renderSettings(){
-  const webhookRoleOpts = ['fm','gm','maint','tech','requester'].map(r=>`<option value="${r}">${ROLES[r].label}</option>`).join('');
-  const webhookRows = ['fm','gm','maint','tech','requester'].map(r => `
+  const webhookRoles = ['admin','fm','gm','maint','tech','requester'];
+  const webhookRoleOpts = webhookRoles.map(r=>`<option value="${r}">${ROLES[r].label}</option>`).join('');
+  const webhookRows = webhookRoles.map(r => `
     <tr><td>${ROLES[r].label}</td><td class="mono" style="word-break:break-all;">${state.config.lineWebhooks[r] ? escapeHtml(state.config.lineWebhooks[r]) : '<span style="color:var(--slate-light)">ยังไม่ได้ตั้งค่า</span>'}</td></tr>`).join('');
 
   return `
   <h2 class="view-title">ตั้งค่าข้อมูลหลัก</h2>
   <p class="view-sub">ข้อมูลหลักจัดการที่ Google Sheet ส่วนนี้ตั้งค่าเฉพาะของแอป</p>
+
+  ${renderAccessRequests()}
+
+  ${renderLineUserRoles()}
 
   <div class="settings-section card">
     <h3>แผนก · เครื่องจักร · ช่าง</h3>
@@ -1439,6 +1830,117 @@ function renderSettings(){
   `;
 }
 
+/* ============================= RENDER: ขอสิทธิ์เข้าใช้งาน ============================= */
+function renderAuthShell(inner){
+  return `
+  <header class="topbar">
+    <div class="brand">
+      <div class="logo">🛠</div>
+      <div>
+        <h1>ระบบแจ้งซ่อมเครื่องจักร</h1>
+        <div class="sub">Maintenance Work Order System</div>
+      </div>
+    </div>
+  </header>
+  <main style="max-width:560px;">${inner}</main>`;
+}
+/* กล่องสำหรับผู้ดูแลระบบคนแรก (ยังไม่มีใครเป็น admin ในระบบ) — เอารหัสประจำเครื่องไปใส่ในชีตเองได้
+   เป็นทางเดียวที่ใช้ตั้ง admin คนแรกได้ หลังจากนั้น admin กดอนุมัติคนอื่นในแอปได้เลย */
+function renderAdminBootstrap(){
+  return `
+  <details class="info-toggle" style="margin-top:14px;">
+    <summary>สำหรับผู้ดูแลระบบ: ตั้งเครื่องนี้เป็นผู้ดูแลระบบ (admin)</summary>
+    <p class="desc" style="font-size:12.5px; color:var(--slate); margin:8px 0;">
+      เปิดชีต <b>สิทธิ์ผู้ใช้ LINE</b> แล้วเพิ่ม 1 แถว โดยใส่ 3 ช่องนี้ตามลำดับ:
+      <span class="mono">รหัสประจำเครื่อง</span> · <span class="mono">admin</span> · <span class="mono">ชื่อของท่าน</span>
+      แล้วรอประมาณ 7 วินาที หน้านี้จะเข้าระบบให้เอง
+    </p>
+    <label class="field-label">รหัสประจำเครื่องของเครื่องนี้</label>
+    <input class="input mono" style="font-size:12px;" readonly value="${escapeHtml(state.deviceId || '')}" onclick="this.select()">
+    <div class="order-actions" style="margin-top:10px;">
+      <button class="btn btn-outline btn-sm" onclick="copyText('${escapeHtml(state.deviceId || '')}', 'คัดลอกรหัสประจำเครื่องแล้ว')">คัดลอกรหัส</button>
+      <a class="btn btn-outline btn-sm" href="${SHEET_URL}" target="_blank" rel="noopener">เปิด Sheet →</a>
+    </div>
+  </details>`;
+}
+function renderRequestAccess(){
+  const u = state.ui;
+  const deptOpts = (state.config.departments || []).map(d =>
+    `<option value="${escapeHtml(d.code)}" ${u.reqDept === d.code ? 'selected' : ''}>${escapeHtml(d.code)} — ${escapeHtml(d.name)}</option>`).join('');
+  const roleOpts = Object.keys(ROLES).filter(r => r !== 'admin').map(r =>
+    `<option value="${r}" ${u.reqRole === r ? 'selected' : ''}>${ROLES[r].icon} ${ROLES[r].label}</option>`).join('');
+  const techOpts = (state.config.technicians || []).map(t =>
+    `<option value="${escapeHtml(t)}" ${u.reqTechName === t ? 'selected' : ''}>${escapeHtml(t)}</option>`).join('');
+  return renderAuthShell(`
+    <h2 class="view-title">ขอสิทธิ์เข้าใช้งาน</h2>
+    <p class="view-sub">กรอกข้อมูลเพื่อขอสิทธิ์ ผู้ดูแลระบบจะเป็นผู้อนุมัติและกำหนดบทบาทให้ท่าน</p>
+    <div class="card">
+      <div class="field">
+        <label class="field-label">ชื่อ-นามสกุล <span class="req-star">*</span></label>
+        <input class="input" value="${escapeHtml(u.reqName)}" oninput="state.ui.reqName=this.value" placeholder="เช่น สมชาย ใจดี">
+      </div>
+      <div class="field">
+        <label class="field-label">แผนก</label>
+        <select class="input" onchange="state.ui.reqDept=this.value">
+          <option value="">— ไม่ระบุ —</option>
+          ${deptOpts}
+        </select>
+      </div>
+      <div class="field">
+        <label class="field-label">บทบาทที่ต้องการ <span class="req-star">*</span></label>
+        <select class="input" onchange="state.ui.reqRole=this.value; state.ui.reqTechName=''; render()">${roleOpts}</select>
+      </div>
+      ${u.reqRole === 'tech' ? `
+      <div class="field">
+        <label class="field-label">ชื่อช่าง (เลือกชื่อของท่านจากรายชื่อช่าง) <span class="req-star">*</span></label>
+        <select class="input" onchange="state.ui.reqTechName=this.value">
+          <option value="">— กรุณาเลือก —</option>
+          ${techOpts}
+        </select>
+        <p class="desc" style="font-size:12px; color:var(--slate); margin:6px 0 0;">ต้องเลือกให้ตรงกับชื่อตัวเอง ระบบใช้ชื่อนี้ตรวจว่างานไหนเป็นงานที่มอบหมายให้ท่าน</p>
+      </div>` : ''}
+      <div class="field">
+        <label class="field-label">หมายเหตุถึงผู้ดูแล</label>
+        <input class="input" value="${escapeHtml(u.reqNote)}" oninput="state.ui.reqNote=this.value" placeholder="เช่น เบอร์ติดต่อ หรือข้อมูลยืนยันตัวตน">
+      </div>
+      <button class="btn btn-primary btn-block" onclick="submitAccessRequest()" ${u.reqSending ? 'disabled' : ''}>
+        ${u.reqSending ? 'กำลังส่งคำขอ...' : 'ส่งคำขอสิทธิ์'}
+      </button>
+    </div>
+    ${renderAdminBootstrap()}`);
+}
+function renderPendingAccess(){
+  const r = state.myRequest || {};
+  return renderAuthShell(`
+    <div class="card" style="text-align:center;">
+      <div style="font-size:44px;">⏳</div>
+      <h2 class="view-title" style="margin-top:6px;">ส่งคำขอแล้ว รอผู้ดูแลอนุมัติ</h2>
+      <p class="view-sub" style="margin-bottom:16px;">ผู้ดูแลระบบได้รับแจ้งเตือนทาง LINE แล้ว เมื่ออนุมัติหน้านี้จะเข้าระบบให้เองโดยท่านไม่ต้องทำอะไร (ไม่ต้องปิดหน้านี้)</p>
+      <table class="mini" style="text-align:left;">
+        <tr><th>ชื่อ</th><td>${escapeHtml(r.name || '-')}</td></tr>
+        <tr><th>แผนก</th><td>${escapeHtml(r.dept || '-')}</td></tr>
+        <tr><th>บทบาทที่ขอ</th><td>${ROLES[r.requestedRole] ? escapeHtml(ROLES[r.requestedRole].label) : '-'}</td></tr>
+        ${r.requestedTechName ? `<tr><th>ชื่อช่าง</th><td>${escapeHtml(r.requestedTechName)}</td></tr>` : ''}
+        <tr><th>ส่งเมื่อ</th><td>${r.at ? escapeHtml(fmtDateTime(r.at)) : '-'}</td></tr>
+      </table>
+      <div class="order-actions" style="margin-top:14px; justify-content:center;">
+        <button class="btn btn-outline btn-sm" onclick="recheckAccess()">ตรวจสอบสถานะตอนนี้</button>
+        <button class="btn btn-outline btn-sm" onclick="cancelMyAccessRequest()">แก้ไข / ยกเลิกคำขอ</button>
+      </div>
+    </div>
+    ${renderAdminBootstrap()}`);
+}
+function renderRejectedAccess(){
+  const r = state.myRequest || {};
+  return renderAuthShell(`
+    <div class="card" style="text-align:center;">
+      <div style="font-size:44px;">🚫</div>
+      <h2 class="view-title" style="margin-top:6px;">คำขอสิทธิ์ไม่ได้รับการอนุมัติ</h2>
+      <p class="view-sub">คำขอของ "${escapeHtml(r.name || '-')}" ถูกปฏิเสธโดยผู้ดูแลระบบ หากเข้าใจว่าเป็นความเข้าใจผิด กรุณาติดต่อผู้ดูแลระบบ แล้วส่งคำขอใหม่ได้</p>
+      <button class="btn btn-outline btn-sm" onclick="cancelMyAccessRequest()">ส่งคำขอใหม่</button>
+    </div>`);
+}
+
 /* ============================= MAIN RENDER ============================= */
 function render(){
   const app = document.getElementById('app');
@@ -1446,15 +1948,9 @@ function render(){
     app.innerHTML = `<div style="padding:60px; text-align:center; color:var(--slate);">กำลังตรวจสอบสิทธิ์ผู้ใช้งาน...</div>`;
     return;
   }
-  if(state.authStatus === 'denied'){
-    app.innerHTML = `<div style="padding:60px; text-align:center; color:var(--slate);">
-      <div style="font-size:48px;">🔒</div>
-      <h2 style="color:var(--ink);">ยังไม่ได้รับสิทธิ์ใช้งาน</h2>
-      <p>บัญชี LINE นี้ยังไม่ได้ลงทะเบียนบทบาทในระบบ กรุณาติดต่อผู้ดูแลระบบเพื่อขอสิทธิ์การใช้งาน</p>
-      ${state.lineUserId ? `<p class="mono" style="font-size:12px;">LINE ID: ${escapeHtml(state.lineUserId)}</p>` : ''}
-    </div>`;
-    return;
-  }
+  if(state.authStatus === 'guest'){ app.innerHTML = renderRequestAccess(); return; }
+  if(state.authStatus === 'pending'){ app.innerHTML = renderPendingAccess(); return; }
+  if(state.authStatus === 'rejected'){ app.innerHTML = renderRejectedAccess(); return; }
   if(!state.loaded){
     app.innerHTML = `<div style="padding:60px; text-align:center; color:var(--slate);">กำลังโหลดระบบ...</div>`;
     return;
@@ -1491,13 +1987,28 @@ function render(){
 /* ============================= LIVE POLLING (near real-time sync) ============================= */
 async function pollForUpdates(){
   try{
-    const [cfg, orders, notifs] = await Promise.all([
-      storeGet('config'), storeGet('orders'), storeGet('notifications')
+    const [cfg, orders, notifs, reqs, lineUsers, lineUserRoles] = await Promise.all([
+      storeGet('config'), storeGet('orders'), storeGet('notifications'), storeGet('accessRequests'),
+      storeGet('lineUsers'), storeGet('lineUserRoles')
     ]);
     let changed = false;
+    if(lineUsers && JSON.stringify(lineUsers) !== JSON.stringify(state.lineUsers)){ state.lineUsers = lineUsers; changed = true; }
+    if(lineUserRoles && JSON.stringify(lineUserRoles) !== JSON.stringify(state.lineUserRoles)){ state.lineUserRoles = lineUserRoles; changed = true; }
     if(cfg && JSON.stringify(cfg) !== JSON.stringify(state.config)){ state.config = cfg; changed = true; }
     if(orders && JSON.stringify(orders) !== JSON.stringify(state.orders)){ state.orders = orders; changed = true; }
     if(notifs && JSON.stringify(notifs) !== JSON.stringify(state.notifications)){ state.notifications = notifs; changed = true; }
+    // คำขอสิทธิ์: ให้ admin เห็นคำขอใหม่สดๆ และถ้าสิทธิ์ของตัวเองถูกแก้/ถอนระหว่างใช้งานก็ปรับตามทันที
+    if(reqs && JSON.stringify(reqs) !== JSON.stringify(state.accessRequests)){
+      const grantSig = r => r ? `${r.status}|${(r.roles || []).join(',')}|${r.techName || ''}` : '';
+      const before = grantSig(state.myRequest);
+      state.accessRequests = reqs;
+      state.myRequest = requestFor(state.didHash, reqs);
+      if(grantSig(state.myRequest) !== before){
+        await resolveAccess();   // สิทธิ์อาจยังเหลือจากชีตอยู่ จึงต้องประเมินใหม่ทั้งสองแหล่ง
+        if(state.authStatus !== 'ok'){ location.reload(); return; }
+      }
+      changed = true;
+    }
     if(changed) render();
   }catch(e){ /* silent - next poll retries */ }
 }
@@ -1524,7 +2035,12 @@ async function checkForUpdate(){
 (async function init(){
   await authenticate();
   render();
-  if(state.authStatus !== 'ok') return; // ยังไม่ล็อกอิน (redirect) หรือไม่มีสิทธิ์ - ไม่โหลดข้อมูลระบบ
+  if(state.authStatus !== 'ok'){
+    // ยังไม่มีสิทธิ์ — คอยเช็คให้เอง พอผู้ดูแลกดอนุมัติแล้วหน้านี้จะเข้าระบบทันทีโดยผู้ใช้ไม่ต้องกดอะไร
+    setInterval(recheckAccess, 7000);
+    document.addEventListener('visibilitychange', () => { if(!document.hidden) recheckAccess(); });
+    return;
+  }
   await loadAll();
 
   const params = new URLSearchParams(location.search);
