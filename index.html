@@ -330,6 +330,7 @@ let state = {
   ui: { actionFor:null, actionType:null, actionNote:'', resubmitPhotos:[], assignTechs:[''], assignStartDate:'', assignEndDate:'', assignReceivedBy:'', assignExecutionPlan:'', maintRecordFor:null, maintRecordCause:'', maintRecordOpinion:'', maintRecordParts:[emptyPartRow()], newWebhookRole:'fm', newWebhookUrl:'', resetConfirming:false, resetConfirmText:'',
     reqName:'', reqDept:'', reqRole:'requester', reqTechName:'', reqNote:'', reqSending:false,
     grantRole:{}, grantTechName:{},
+    editingAccessId:null, editRole:{}, editTechName:{},
     lineRole:{}, lineTechName:{}, lineName:{}, newLineUserId:'', newLineUserName:'' },
 };
 
@@ -539,6 +540,38 @@ async function rejectAccessRequest(id){
   });
   if(!ok){ toast('บันทึกไม่สำเร็จ กรุณาลองใหม่', true); return; }
   toast('ปฏิเสธคำขอแล้ว');
+  render();
+}
+function startEditAccessRoles(id){
+  const req = state.accessRequests.find(r => r.id === id);
+  if(!req) return;
+  state.ui.editingAccessId = id;
+  state.ui.editRole[id] = (req.roles || []).slice();
+  state.ui.editTechName[id] = req.techName || '';
+  render();
+}
+function cancelEditAccessRoles(){ state.ui.editingAccessId = null; render(); }
+function toggleEditRole(id, role, checked){
+  const cur = state.ui.editRole[id] || [];
+  state.ui.editRole[id] = checked ? [...new Set([...cur, role])] : cur.filter(r => r !== role);
+  render();
+}
+async function saveAccessRoles(id){
+  const req = state.accessRequests.find(r => r.id === id);
+  if(!req) return;
+  const roles = state.ui.editRole[id] || [];
+  if(!roles.length || !roles.every(r => ROLES[r])){ toast('กรุณาเลือกบทบาทอย่างน้อย 1 บทบาท', true); return; }
+  const techName = roles.includes('tech') ? (state.ui.editTechName[id] || '') : '';
+  if(roles.includes('tech') && !techName){ toast('กรุณาเลือกชื่อช่างให้ตรงกับรายชื่อในชีต "ช่าง"', true); return; }
+  const ok = await saveAccessRequests(list => {
+    const t = list.find(r => r.id === id);
+    if(!t) return null;
+    t.roles = roles; t.techName = techName;
+    return list;
+  });
+  if(!ok){ toast('บันทึกไม่สำเร็จ กรุณาลองใหม่', true); return; }
+  state.ui.editingAccessId = null;
+  toast(`บันทึกบทบาทของ ${req.name} แล้ว`);
   render();
 }
 async function revokeAccessRequest(id){
@@ -1649,11 +1682,42 @@ function renderAccessRequests(){
     const pill = r.status === 'approved'
       ? `<span class="status-pill" style="color:#2F8F6B; background:#e6f3ee;">อนุมัติแล้ว</span>`
       : `<span class="status-pill" style="color:#B5433A; background:#fbeae8;">ปฏิเสธ</span>`;
+    if(r.status === 'approved' && state.ui.editingAccessId === r.id){
+      const roles = state.ui.editRole[r.id] || [];
+      const techName = state.ui.editTechName[r.id] || '';
+      const roleChecks = Object.keys(ROLES).map(k => `
+          <label style="display:flex; align-items:center; gap:6px; font-size:13px; font-weight:normal;">
+            <input type="checkbox" value="${k}" ${roles.includes(k) ? 'checked' : ''}
+              onchange="toggleEditRole('${r.id}', '${k}', this.checked)">
+            ${ROLES[k].label}
+          </label>`).join('');
+      return `<tr><td colspan="4">
+        <div style="padding:6px 0;">
+          <div style="font-size:13px; margin-bottom:6px;"><b>${escapeHtml(r.name)}</b>${r.dept ? ` · ${escapeHtml(r.dept)}` : ''}</div>
+          <div style="display:flex; flex-wrap:wrap; gap:4px 16px;">${roleChecks}</div>
+          ${roles.includes('tech') ? `
+          <div style="margin-top:8px;">
+            <label class="field-label">ชื่อช่าง (ต้องตรงกับชีต "ช่าง") <span class="req-star">*</span></label>
+            <select class="input" onchange="state.ui.editTechName['${r.id}']=this.value">
+              <option value="">— กรุณาเลือก —</option>
+              ${techOptsFor(techName)}
+            </select>
+          </div>` : ''}
+          <div class="order-actions" style="margin-top:10px;">
+            <button class="btn btn-success btn-sm" onclick="saveAccessRoles('${r.id}')">บันทึก</button>
+            <button class="btn btn-outline btn-sm" onclick="cancelEditAccessRoles()">ยกเลิก</button>
+          </div>
+        </div>
+      </td></tr>`;
+    }
     return `<tr>
       <td>${escapeHtml(r.name)}${r.techName ? `<div style="font-size:11.5px; color:var(--slate);">${escapeHtml(r.techName)}</div>` : ''}</td>
       <td>${escapeHtml(r.dept || '-')}</td>
       <td>${pill}${granted ? ` <span style="font-size:12px;">${escapeHtml(granted)}</span>` : ''}</td>
-      <td><button class="del" onclick="revokeAccessRequest('${r.id}')">ถอนสิทธิ์/ลบ</button></td>
+      <td>
+        ${r.status === 'approved' ? `<button class="del" onclick="startEditAccessRoles('${r.id}')">แก้ไขบทบาท</button> ` : ''}
+        <button class="del" onclick="revokeAccessRequest('${r.id}')">ถอนสิทธิ์/ลบ</button>
+      </td>
     </tr>`;
   }).join('');
 
