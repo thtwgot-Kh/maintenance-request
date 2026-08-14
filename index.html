@@ -1856,7 +1856,7 @@ function renderLineUserRoles(){
 
 function renderSettings(){
   const webhookRoles = ['admin','fm','gm','maint','tech','requester'];
-  const webhookRoleOpts = webhookRoles.map(r=>`<option value="${r}">${ROLES[r].label}</option>`).join('');
+  const webhookRoleOpts = webhookRoles.map(r=>`<option value="${r}" ${state.ui.newWebhookRole===r ? 'selected' : ''}>${ROLES[r].label}</option>`).join('');
   const webhookRows = webhookRoles.map(r => `
     <tr><td>${ROLES[r].label}</td><td class="mono" style="word-break:break-all;">${state.config.lineWebhooks[r] ? escapeHtml(state.config.lineWebhooks[r]) : '<span style="color:var(--slate-light)">ยังไม่ได้ตั้งค่า</span>'}</td></tr>`).join('');
 
