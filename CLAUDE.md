@@ -206,9 +206,14 @@ Behavior:
 - Outgoing notification requests from the app (`body.role`/`body.message`
   present) → looks up recipients for that role in a **`แจ้งเตือน LINE -
   ผู้รับ`** tab (columns: บทบาท, userId) and pushes individually via LINE's
-  push API. **Falls back to broadcasting to every OA friend if no recipient
-  is mapped for that role yet** — this is the current state for roles that
-  haven't had a real person's `userId` assigned.
+  push API. **No longer broadcasts to every OA friend as a fallback** — if
+  no recipient is mapped for a role (neither via the client-sent `userIds`
+  nor a row in this sheet tab), the notification for that role is simply
+  not sent, rather than pinging everyone who's ever friended the OA. This
+  was a deliberate fix (the broadcast fallback used to fire on every access
+  request, since `admin` rarely has a mapped recipient) — until a role has
+  a real recipient mapped, that role's notifications go nowhere, which is
+  the intended tradeoff over notifying unrelated people.
   - `body.role` is not limited to the app's named roles (fm/gm/maint/
     tech/requester) — `assignTechnician()` in `index.html` sends each
     assigned technician's exact name (from the **ช่าง** tab /
@@ -217,8 +222,9 @@ Behavior:
     route that to the right person, add a row per technician to
     `แจ้งเตือน LINE - ผู้รับ` with บทบาท = their exact name string and
     userId = their LINE userId — same mechanism as the other roles, no
-    Apps Script changes needed. Until a technician has a row there, their
-    assignment ping falls back to the broadcast-to-everyone behavior above.
+    Apps Script changes needed. Until a technician has a row there (or a
+    `lineUserRoles` mapping with that name as `techName`), their assignment
+    ping simply isn't sent — see the no-broadcast-fallback note above.
     (This per-name routing is separate from the `tech` app role below —
     `tech` is the role a technician's own LINE account holds to log into
     the app; the per-name row is what makes the *assignment* ping personal.)
@@ -233,12 +239,13 @@ Behavior:
     ที่ทักเข้ามา** (that screen lists the `lineUsers` KV entries and lets
     admin attach a role — and for `tech`, a technician name — to each LINE
     userId, replacing hand-editing the `แจ้งเตือน LINE - ผู้รับ` tab).
-    **The relay script does not read `userIds` yet** — it still resolves
-    recipients from that sheet tab and broadcasts when a role has no row,
-    so this field is currently inert and harmless. To make routing precise,
-    the relay's `doPost` needs a one-time hand edit: when `body.userIds` is
-    a non-empty array, push to exactly those ids and skip both the sheet
-    lookup and the broadcast fallback.
+    **The relay script now honors `userIds`**: `handleNotifyRequest_` pushes
+    to `body.userIds` when it's a non-empty array, skipping the sheet lookup
+    entirely; only falls back to the `แจ้งเตือน LINE - ผู้รับ` sheet lookup
+    when the client sent no `userIds`, and no longer broadcasts to every OA
+    friend if neither source has a recipient (see the note above). This was
+    a hand-edit made directly in the Apps Script editor, since that code
+    isn't in this repo.
   - Nothing populates the `lineUsers` KV key automatically yet either — the
     relay logs followers to the **`LINE Users`** sheet tab only. Until it
     also mirrors them into KV (or the main script exposes that tab via a
@@ -300,9 +307,11 @@ in git.
   Apps Script projects built and deployed, CORS bug fixed. Still open:
   finish wiring the LINE Developers Console Webhook URL field, have each
   real recipient message the OA once to get logged into `LINE Users`, then
-  fill in the `แจ้งเตือน LINE - ผู้รับ` tab mapping each role to a real
-  `userId`. Until that mapping exists per role, notifications for that role
-  broadcast to every OA friend instead of the intended person.
+  fill in the `แจ้งเตือน LINE - ผู้รับ` tab (or the in-app **กำหนดบทบาท
+  ผู้ใช้ LINE ที่ทักเข้ามา** screen) mapping each role to a real `userId`.
+  The relay's broadcast-to-everyone fallback was removed (see the "LineOA
+  MT" section above) — until that mapping exists per role, notifications
+  for that role simply aren't sent, rather than reaching unrelated people.
 - Technician assignment now also fires a personal LINE push (see
   `assignTechnician()` in `index.html`, keyed by the technician's exact name
   as `role`) — needs the same `แจ้งเตือน LINE - ผู้รับ` mapping filled in
