@@ -1137,16 +1137,25 @@ async function resetAllData(){
 // บทบาท "tech" หนึ่งบัญชี LINE อาจผูกกับชื่อช่างได้หลายคน (เช่น บัญชีทดสอบ) จึงต้องขยาย
 // รายการตัวเลือกให้เห็นชื่อช่างแต่ละคนแยกกัน ค่า option จึงเป็น "tech|<index>" สำหรับ tech
 // และเป็น role key เฉยๆ สำหรับบทบาทอื่น
+// admin สลับไปดูหน้าจอ "ในฐานะ" บทบาท/ช่างคนไหนก็ได้ — ระหว่างสลับ hasRole() จะเห็นเฉพาะ
+// บทบาทที่กำลังสวมอยู่จริง (ไม่ผ่าน admin bypass) เพื่อให้เห็นหน้าจอตรงกับที่คนนั้นเห็นจริง
+// สลับกลับมาเป็น admin ได้เสมอจาก dropdown เดียวกัน
+function techSwitchNames(){
+  return state.allowedRoles.includes('admin') ? (state.config.technicians || []) : state.techIdentities;
+}
 function roleOptionList(){
+  const isAdmin = state.allowedRoles.includes('admin');
   const opts = [];
-  state.allowedRoles.forEach(r => {
-    if(r === 'tech' && state.techIdentities.length > 1){
-      state.techIdentities.forEach((name, i) => {
-        opts.push({ value:`tech|${i}`, label:`${ROLES.tech.icon} ${ROLES.tech.label} — ${name}` });
-      });
-    } else if(r === 'tech'){
-      const name = state.techIdentities[0];
-      opts.push({ value:'tech|0', label:`${ROLES.tech.icon} ${ROLES.tech.label}` + (name ? ` — ${name}` : '') });
+  (isAdmin ? Object.keys(ROLES) : state.allowedRoles).forEach(r => {
+    if(r === 'tech'){
+      const names = techSwitchNames();
+      if(names.length > 1){
+        names.forEach((name, i) => {
+          opts.push({ value:`tech|${i}`, label:`${ROLES.tech.icon} ${ROLES.tech.label} — ${name}` });
+        });
+      } else {
+        opts.push({ value:'tech|0', label:`${ROLES.tech.icon} ${ROLES.tech.label}` + (names[0] ? ` — ${names[0]}` : '') });
+      }
     } else {
       opts.push({ value:r, label:`${ROLES[r].icon} ${ROLES[r].label}` });
     }
@@ -1155,17 +1164,18 @@ function roleOptionList(){
 }
 function currentRoleValue(){
   if(state.role === 'tech'){
-    const idx = state.techIdentities.indexOf(state.myTechName);
+    const idx = techSwitchNames().indexOf(state.myTechName);
     return `tech|${idx >= 0 ? idx : 0}`;
   }
   return state.role;
 }
 function setRole(value){
   const [key, idxStr] = String(value).split('|');
-  if(!state.allowedRoles.includes(key)) return;
+  if(!ROLES[key]) return;
+  if(!state.allowedRoles.includes('admin') && !state.allowedRoles.includes(key)) return;
   state.role = key; state.ui.actionFor=null; state.ui.actionType=null; state.ui.actionNote='';
   if(key === 'tech'){
-    state.myTechName = state.techIdentities[parseInt(idxStr, 10) || 0] || '';
+    state.myTechName = techSwitchNames()[parseInt(idxStr, 10) || 0] || '';
   }
   if(state.view==='settings' && state.role!=='admin') state.view='list';
   render();
