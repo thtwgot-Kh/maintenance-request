@@ -508,21 +508,21 @@ async function cancelMyAccessRequest(){
 async function approveAccessRequest(id){
   const req = state.accessRequests.find(r => r.id === id);
   if(!req) return;
-  const role = state.ui.grantRole[id] || req.requestedRole;
-  if(!ROLES[role]){ toast('กรุณาเลือกบทบาท', true); return; }
+  const roles = (state.ui.grantRole[id] && state.ui.grantRole[id].length) ? state.ui.grantRole[id] : [req.requestedRole];
+  if(!roles.length || !roles.every(r => ROLES[r])){ toast('กรุณาเลือกบทบาทอย่างน้อย 1 บทบาท', true); return; }
   // บทบาท tech ต้องผูกกับชื่อช่างที่ตรงกับชีต "ช่าง" เป๊ะๆ ไม่งั้นจะไม่เห็นปุ่มเริ่ม/จบงานของตัวเอง
-  const techName = role === 'tech' ? (state.ui.grantTechName[id] || req.requestedTechName || '') : '';
-  if(role === 'tech' && !techName){ toast('กรุณาเลือกชื่อช่างให้ตรงกับรายชื่อในชีต "ช่าง"', true); return; }
+  const techName = roles.includes('tech') ? (state.ui.grantTechName[id] || req.requestedTechName || '') : '';
+  if(roles.includes('tech') && !techName){ toast('กรุณาเลือกชื่อช่างให้ตรงกับรายชื่อในชีต "ช่าง"', true); return; }
   const ok = await saveAccessRequests(list => {
     const t = list.find(r => r.id === id);
     if(!t) return null;
-    t.status = 'approved'; t.roles = [role]; t.techName = techName;
+    t.status = 'approved'; t.roles = roles; t.techName = techName;
     t.decidedAt = nowIso();
     t.decidedBy = ROLES[state.role] ? ROLES[state.role].label : 'ผู้ดูแลระบบ';
     return list;
   });
   if(!ok){ toast('บันทึกไม่สำเร็จ กรุณาลองใหม่', true); return; }
-  toast(`อนุมัติ ${req.name} เป็น "${ROLES[role].label}" แล้ว`);
+  toast(`อนุมัติ ${req.name} เป็น "${roles.map(r => ROLES[r].label).join(', ')}" แล้ว`);
   render();
 }
 async function rejectAccessRequest(id){
@@ -1590,7 +1590,11 @@ function renderNotif(){
 }
 
 /* ============================= RENDER: SETTINGS ============================= */
-function setGrantRole(id, v){ state.ui.grantRole[id] = v; render(); }
+function toggleGrantRole(id, defaultRoles, role, checked){
+  const cur = state.ui.grantRole[id] || defaultRoles.slice();
+  state.ui.grantRole[id] = checked ? [...new Set([...cur, role])] : cur.filter(r => r !== role);
+  render();
+}
 function pendingAccessCount(){ return state.accessRequests.filter(r => r.status === 'pending').length; }
 function renderAccessRequests(){
   const list = state.accessRequests.slice().sort((a,b) => String(b.at).localeCompare(String(a.at)));
@@ -1600,10 +1604,16 @@ function renderAccessRequests(){
     `<option value="${escapeHtml(t)}" ${cur === t ? 'selected' : ''}>${escapeHtml(t)}</option>`).join('');
 
   const pendingCards = pending.map(r => {
-    const role = state.ui.grantRole[r.id] || r.requestedRole;
+    const defaultRoles = [r.requestedRole];
+    const roles = state.ui.grantRole[r.id] || defaultRoles;
     const techName = state.ui.grantTechName[r.id] || r.requestedTechName || '';
-    const roleOpts = Object.keys(ROLES).map(k =>
-      `<option value="${k}" ${role === k ? 'selected' : ''}>${ROLES[k].label}</option>`).join('');
+    const defaultRolesJs = `[${defaultRoles.map(x => `'${x}'`).join(',')}]`;
+    const roleChecks = Object.keys(ROLES).map(k => `
+        <label style="display:flex; align-items:center; gap:6px; font-size:13.5px; font-weight:normal;">
+          <input type="checkbox" value="${k}" ${roles.includes(k) ? 'checked' : ''}
+            onchange="toggleGrantRole('${r.id}', ${defaultRolesJs}, '${k}', this.checked)">
+          ${ROLES[k].label}
+        </label>`).join('');
     return `
     <div class="reject-box">
       <div style="display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; align-items:baseline;">
@@ -1616,10 +1626,10 @@ function renderAccessRequests(){
       </div>
       ${r.note ? `<div style="font-size:13px; margin-top:4px;">หมายเหตุ: ${escapeHtml(r.note)}</div>` : ''}
       <div style="margin-top:10px;">
-        <label class="field-label">บทบาทที่จะให้</label>
-        <select class="input" onchange="setGrantRole('${r.id}', this.value)">${roleOpts}</select>
+        <label class="field-label">บทบาทที่จะให้ (เลือกได้มากกว่า 1)</label>
+        <div style="display:flex; flex-wrap:wrap; gap:4px 16px; margin-top:4px;">${roleChecks}</div>
       </div>
-      ${role === 'tech' ? `
+      ${roles.includes('tech') ? `
       <div style="margin-top:10px;">
         <label class="field-label">ชื่อช่าง (ต้องตรงกับชีต "ช่าง") <span class="req-star">*</span></label>
         <select class="input" onchange="state.ui.grantTechName['${r.id}']=this.value">
