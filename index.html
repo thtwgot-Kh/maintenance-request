@@ -313,6 +313,7 @@ let state = {
   myRequest: null,
   lineUsers: [],       // ผู้ใช้ LINE ที่ทักเข้ามาหา OA (มาจากแท็บ "LINE Users" ในชีต)
   lineUserRoles: {},   // userId -> { name, roles:[], techName } กำหนดโดย admin ในหน้าตั้งค่า
+  lineRecipients: [],  // { role, userId, name } อ่านอย่างเดียวจากแท็บ "แจ้งเตือน LINE - ผู้รับ" ที่พิมพ์เองในชีต
   authStatus: 'loading', // loading | guest | pending | rejected | ok
   view: 'new',
   config: { departments: DEPT_DEFAULT, machines: MACHINES_DEFAULT, technicians: TECH_DEFAULT, lineWebhooks:{} },
@@ -615,9 +616,9 @@ async function storeSet(key, val){
 }
 
 async function loadAll(){
-  const [cfg, counters, orders, notifs, lineUsers, lineUserRoles] = await Promise.all([
+  const [cfg, counters, orders, notifs, lineUsers, lineUserRoles, lineRecipients] = await Promise.all([
     storeGet('config'), storeGet('counters'), storeGet('orders'), storeGet('notifications'),
-    storeGet('lineUsers'), storeGet('lineUserRoles')
+    storeGet('lineUsers'), storeGet('lineUserRoles'), storeGet('lineRecipients')
   ]);
   state.config = cfg || state.config;
   if(!state.config.lineWebhooks) state.config.lineWebhooks = {};
@@ -626,6 +627,7 @@ async function loadAll(){
   state.notifications = notifs || [];
   state.lineUsers = Array.isArray(lineUsers) ? lineUsers : [];
   state.lineUserRoles = (lineUserRoles && typeof lineUserRoles === 'object') ? lineUserRoles : {};
+  state.lineRecipients = Array.isArray(lineRecipients) ? lineRecipients : [];
   state.loaded = true;
   // เขียน config เริ่มต้นกลับไปเฉพาะตอนเซิร์ฟเวอร์ตอบว่า "ยังไม่มี config เลยจริงๆ" (cfg === null)
   // ห้ามเขียนทับตอนแค่ดึงข้อมูลไม่สำเร็จ (cfg === undefined เช่น deploy ใหม่ยังไม่พร้อม/เน็ตหลุด)
@@ -1659,12 +1661,21 @@ function renderAccessRequests(){
   const decided = list.filter(r => r.status !== 'pending');
   const techOptsFor = (cur) => (state.config.technicians || []).map(t =>
     `<option value="${escapeHtml(t)}" ${cur === t ? 'selected' : ''}>${escapeHtml(t)}</option>`).join('');
-  // คนที่เคยทักไลน์ OA เข้ามา (แท็บ LINE Users) + คนที่ถูกกำหนดบทบาทไว้แล้ว ให้ admin เลือกผูกกับคำขอนี้ได้
+  // คนที่เคยทักไลน์ OA เข้ามา (แท็บ LINE Users) + คนที่ถูกกำหนดบทบาทไว้แล้ว + คนที่พิมพ์ไว้เองในชีต
+  // "แจ้งเตือน LINE - ผู้รับ" ให้ admin เลือกผูกกับคำขอนี้ได้ (รวมทุกแหล่ง ไม่ซ้ำ userId เดียวกัน)
+  const lineRecipientById = {};
+  state.lineRecipients.forEach(r => { if(r.userId && !lineRecipientById[r.userId]) lineRecipientById[r.userId] = r; });
   const lineUserOptsFor = (cur) => {
-    const ids = [...new Set(state.lineUsers.map(u => u.userId).concat(Object.keys(state.lineUserRoles)))];
+    const ids = [...new Set(
+      state.lineUsers.map(u => u.userId)
+        .concat(Object.keys(state.lineUserRoles))
+        .concat(Object.keys(lineRecipientById))
+    )];
     return ids.map(id => {
       const known = state.lineUsers.find(u => u.userId === id) || {};
-      const label = known.displayName || (state.lineUserRoles[id] && state.lineUserRoles[id].name) || id;
+      const fromSheet = lineRecipientById[id];
+      const label = known.displayName || (state.lineUserRoles[id] && state.lineUserRoles[id].name)
+        || (fromSheet && fromSheet.name) || (fromSheet ? `(${fromSheet.role})` : id);
       return `<option value="${escapeHtml(id)}" ${cur === id ? 'selected' : ''}>${escapeHtml(label)}</option>`;
     }).join('');
   };
@@ -2102,13 +2113,14 @@ function render(){
 /* ============================= LIVE POLLING (near real-time sync) ============================= */
 async function pollForUpdates(){
   try{
-    const [cfg, orders, notifs, reqs, lineUsers, lineUserRoles] = await Promise.all([
+    const [cfg, orders, notifs, reqs, lineUsers, lineUserRoles, lineRecipients] = await Promise.all([
       storeGet('config'), storeGet('orders'), storeGet('notifications'), storeGet('accessRequests'),
-      storeGet('lineUsers'), storeGet('lineUserRoles')
+      storeGet('lineUsers'), storeGet('lineUserRoles'), storeGet('lineRecipients')
     ]);
     let changed = false;
     if(lineUsers && JSON.stringify(lineUsers) !== JSON.stringify(state.lineUsers)){ state.lineUsers = lineUsers; changed = true; }
     if(lineUserRoles && JSON.stringify(lineUserRoles) !== JSON.stringify(state.lineUserRoles)){ state.lineUserRoles = lineUserRoles; changed = true; }
+    if(lineRecipients && JSON.stringify(lineRecipients) !== JSON.stringify(state.lineRecipients)){ state.lineRecipients = lineRecipients; changed = true; }
     if(cfg && JSON.stringify(cfg) !== JSON.stringify(state.config)){ state.config = cfg; changed = true; }
     if(orders && JSON.stringify(orders) !== JSON.stringify(state.orders)){ state.orders = orders; changed = true; }
     if(notifs && JSON.stringify(notifs) !== JSON.stringify(state.notifications)){ state.notifications = notifs; changed = true; }
