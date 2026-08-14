@@ -329,7 +329,7 @@ let state = {
   updateAvailable: false,
   ui: { actionFor:null, actionType:null, actionNote:'', resubmitPhotos:[], assignTechs:[''], assignStartDate:'', assignEndDate:'', assignReceivedBy:'', assignExecutionPlan:'', maintRecordFor:null, maintRecordCause:'', maintRecordOpinion:'', maintRecordParts:[emptyPartRow()], newWebhookRole:'fm', newWebhookUrl:'', resetConfirming:false, resetConfirmText:'',
     reqName:'', reqDept:'', reqRole:'requester', reqTechName:'', reqNote:'', reqSending:false,
-    grantRole:{}, grantTechName:{},
+    grantRole:{}, grantTechName:{}, grantLineUserId:{},
     editingAccessId:null, editRole:{}, editTechName:{},
     lineRole:{}, lineTechName:{}, lineName:{}, newLineUserId:'', newLineUserName:'' },
 };
@@ -514,16 +514,21 @@ async function approveAccessRequest(id){
   // บทบาท tech ต้องผูกกับชื่อช่างที่ตรงกับชีต "ช่าง" เป๊ะๆ ไม่งั้นจะไม่เห็นปุ่มเริ่ม/จบงานของตัวเอง
   const techName = roles.includes('tech') ? (state.ui.grantTechName[id] || req.requestedTechName || '') : '';
   if(roles.includes('tech') && !techName){ toast('กรุณาเลือกชื่อช่างให้ตรงกับรายชื่อในชีต "ช่าง"', true); return; }
+  const lineUserId = (state.ui.grantLineUserId[id] || req.lineUserId || '').trim();
   const ok = await saveAccessRequests(list => {
     const t = list.find(r => r.id === id);
     if(!t) return null;
-    t.status = 'approved'; t.roles = roles; t.techName = techName;
+    t.status = 'approved'; t.roles = roles; t.techName = techName; t.lineUserId = lineUserId;
     t.decidedAt = nowIso();
     t.decidedBy = ROLES[state.role] ? ROLES[state.role].label : 'ผู้ดูแลระบบ';
     return list;
   });
   if(!ok){ toast('บันทึกไม่สำเร็จ กรุณาลองใหม่', true); return; }
   toast(`อนุมัติ ${req.name} เป็น "${roles.map(r => ROLES[r].label).join(', ')}" แล้ว`);
+  if(lineUserId){
+    await sendLineToUserIds([lineUserId],
+      `✅ คำขอสิทธิ์เข้าใช้งานของคุณได้รับอนุมัติแล้ว เป็น "${roles.map(r => ROLES[r].label).join(', ')}"\nเข้าใช้งานได้ทันทีที่ ${APP_URL}`);
+  }
   render();
 }
 async function rejectAccessRequest(id){
@@ -680,6 +685,15 @@ function lineRecipientsForRole(role){
     const m = map[userId] || {};
     return (m.roles || []).includes(role) || (m.techName && m.techName === role);
   });
+}
+async function sendLineToUserIds(userIds, message){
+  if(!userIds || !userIds.length) return;
+  const hooks = state.config.lineWebhooks || {};
+  const url = Object.values(hooks).find(Boolean);
+  if(!url) return;
+  try{
+    await fetch(url, { method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'}, body: JSON.stringify({ userIds, message, at: nowIso() }) });
+  }catch(e){ console.warn('LINE relay webhook not reachable (check URL / CORS):', e); }
 }
 async function tryLineWebhook(role, message){
   const hooks = state.config.lineWebhooks || {};
@@ -1645,11 +1659,21 @@ function renderAccessRequests(){
   const decided = list.filter(r => r.status !== 'pending');
   const techOptsFor = (cur) => (state.config.technicians || []).map(t =>
     `<option value="${escapeHtml(t)}" ${cur === t ? 'selected' : ''}>${escapeHtml(t)}</option>`).join('');
+  // คนที่เคยทักไลน์ OA เข้ามา (แท็บ LINE Users) + คนที่ถูกกำหนดบทบาทไว้แล้ว ให้ admin เลือกผูกกับคำขอนี้ได้
+  const lineUserOptsFor = (cur) => {
+    const ids = [...new Set(state.lineUsers.map(u => u.userId).concat(Object.keys(state.lineUserRoles)))];
+    return ids.map(id => {
+      const known = state.lineUsers.find(u => u.userId === id) || {};
+      const label = known.displayName || (state.lineUserRoles[id] && state.lineUserRoles[id].name) || id;
+      return `<option value="${escapeHtml(id)}" ${cur === id ? 'selected' : ''}>${escapeHtml(label)}</option>`;
+    }).join('');
+  };
 
   const pendingCards = pending.map(r => {
     const defaultRoles = [r.requestedRole];
     const roles = state.ui.grantRole[r.id] || defaultRoles;
     const techName = state.ui.grantTechName[r.id] || r.requestedTechName || '';
+    const lineUserId = state.ui.grantLineUserId[r.id] !== undefined ? state.ui.grantLineUserId[r.id] : (r.lineUserId || '');
     const defaultRolesJs = `[${defaultRoles.map(x => `'${x}'`).join(',')}]`;
     const roleChecks = Object.keys(ROLES).map(k => `
         <label style="display:flex; align-items:center; gap:6px; font-size:13.5px; font-weight:normal;">
@@ -1680,6 +1704,13 @@ function renderAccessRequests(){
           ${techOptsFor(techName)}
         </select>
       </div>` : ''}
+      <div style="margin-top:10px;">
+        <label class="field-label">LINE ของคนนี้ (ถ้ามี) — จะส่งแจ้งเตือนไปหาโดยตรงตอนอนุมัติ</label>
+        <select class="input" onchange="state.ui.grantLineUserId['${r.id}']=this.value">
+          <option value="">— ไม่ทราบ/ไม่เชื่อม —</option>
+          ${lineUserOptsFor(lineUserId)}
+        </select>
+      </div>
       <div class="order-actions" style="margin-top:12px;">
         <button class="btn btn-success btn-sm" onclick="approveAccessRequest('${r.id}')">✓ อนุมัติ</button>
         <button class="btn btn-danger-outline btn-sm" onclick="rejectAccessRequest('${r.id}')">ปฏิเสธ</button>
