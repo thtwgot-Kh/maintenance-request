@@ -305,6 +305,7 @@ const emptyPartRow = () => ({ name:'', qty:'', unit:'', price:'', shop:'', note:
 let state = {
   role: null,
   allowedRoles: [],
+  myName: '',
   myTechName: '',
   techIdentities: [],
   deviceId: null,   // รหัสประจำเครื่อง/เบราว์เซอร์ ใช้แทน LINE userId เป็นตัวระบุตัวตน
@@ -397,6 +398,11 @@ function requestFor(hash, list){
   if(!hash) return null;
   return (list || []).find(r => r.didHash === hash) || null;
 }
+// เติมชื่อผู้ล็อกอินลงช่อง "ชื่อผู้แจ้ง" ให้อัตโนมัติ แค่ตอนช่องยังว่างอยู่ — ไม่เขียนทับ
+// ถ้าผู้ใช้แก้ไขเป็นชื่ออื่นเอง (เช่น แจ้งซ่อมแทนเพื่อนร่วมงาน)
+function applyMyNameToForm(){
+  if(state.myName && !state.form.requestedBy) state.form.requestedBy = state.myName;
+}
 /* รวมบทบาทจากชีต + จากคำขอที่อนุมัติแล้ว แล้วตัดสินว่าเข้าใช้งานได้หรือยัง */
 async function resolveAccess(){
   const [sheet, requests] = await Promise.all([
@@ -417,6 +423,10 @@ async function resolveAccess(){
   state.allowedRoles = [...new Set(roles.filter(r => ROLES[r]))];
   state.techIdentities = [...new Set(techNames)];
   state.myTechName = state.techIdentities[0] || '';
+  // ชื่อของผู้ล็อกอินเอง (จากตอนขอสิทธิ์ หรือชื่อช่างถ้าไม่มี) ไว้เติมช่อง "ชื่อผู้แจ้ง" ให้อัตโนมัติ
+  // จะได้ไม่ต้องพิมพ์ชื่อตัวเองซ้ำทุกครั้งที่แจ้งซ่อม
+  state.myName = (mine && mine.name) || state.techIdentities[0] || '';
+  applyMyNameToForm();
   if(state.allowedRoles.length){
     state.role = state.allowedRoles[0];
     state.authStatus = 'ok';
@@ -833,6 +843,7 @@ async function submitOrder(){
   await pushNotification('fm', id, docNumber, `มีใบแจ้งซ่อมใหม่จากแผนก ${f.dept} รอการอนุมัติของท่าน`);
 
   state.form = emptyForm();
+  applyMyNameToForm();
   toast(`ส่งใบแจ้งซ่อมเรียบร้อย เลขที่เอกสาร ${docNumber}`);
   state.view = 'list';
   render();
