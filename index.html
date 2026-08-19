@@ -2250,6 +2250,9 @@ async function checkForUpdate(){
   await authenticate();
   render();
   if(state.authStatus !== 'ok'){
+    // หน้า "ขอสิทธิ์เข้าใช้งาน" ใช้ config (แผนก/ชื่อช่าง) ในดรอปดาวน์ — โหลดเบื้องหลังไม่บล็อกฟอร์ม
+    // (เดิมหน้านี้ไม่เคยโหลด config เลย เลยโชว์รายชื่อ default ที่ฝังไว้ในโค้ด ไม่ใช่ของจริงจากชีต)
+    loadEssential().then(render);
     // ยังไม่มีสิทธิ์ — คอยเช็คให้เอง พอผู้ดูแลกดอนุมัติแล้วหน้านี้จะเข้าระบบทันทีโดยผู้ใช้ไม่ต้องกดอะไร
     setInterval(recheckAccess, 7000);
     document.addEventListener('visibilitychange', () => { if(!document.hidden) recheckAccess(); });
