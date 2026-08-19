@@ -544,7 +544,7 @@ async function submitAccessRequest(){
     `บทบาทที่ขอ: ${ROLES[entry.requestedRole].label}` +
     (entry.requestedTechName ? `\nชื่อช่าง: ${entry.requestedTechName}` : '') +
     (entry.note ? `\nหมายเหตุ: ${entry.note}` : '') +
-    `\n\nกดอนุมัติได้ที่หน้า "ตั้งค่าข้อมูลหลัก" → คำขอสิทธิ์เข้าใช้งาน\n${APP_URL}`);
+    `\n\nกดอนุมัติได้ที่หน้า "ตั้งค่าข้อมูลหลัก" → คำขอสิทธิ์เข้าใช้งาน\n${accessRequestsDeepLink()}`);
 }
 async function cancelMyAccessRequest(){
   const ok = await saveAccessRequests(list => list.filter(r => r.didHash !== state.didHash));
@@ -792,6 +792,11 @@ async function tryLineWebhook(role, message){
 }
 
 /* ============================= NOTIFICATIONS ============================= */
+// ลิงก์ลึกไปหน้า "ตั้งค่าข้อมูลหลัก" (ส่วนคำขอสิทธิ์เข้าใช้งานอยู่บนสุดของหน้านั้นพอดี) —
+// ใช้กลไกเดียวกับ orderDeepLink ด้านล่าง (?role=...&view=...) ดู init() ที่ท้ายไฟล์
+function accessRequestsDeepLink(){
+  return `${APP_URL}?role=admin&view=settings`;
+}
 function orderDeepLink(orderId, role){
   return `${APP_URL}?order=${encodeURIComponent(orderId)}&role=${encodeURIComponent(role)}`;
 }
@@ -2270,7 +2275,8 @@ async function checkForUpdate(){
 
 /* ============================= INIT ============================= */
 /* รองรับลิงก์ลึกจากการแจ้งเตือน LINE: ?order=<id>&role=<role> เปิดตรงไปที่ใบแจ้งซ่อมนั้น
-   และสลับบทบาทให้ตรงกับผู้รับแจ้งเตือน (ถ้าบัญชีนี้มีสิทธิ์บทบาทนั้นจริง) */
+   และสลับบทบาทให้ตรงกับผู้รับแจ้งเตือน (ถ้าบัญชีนี้มีสิทธิ์บทบาทนั้นจริง)
+   ?role=admin&view=settings เปิดตรงไปหน้า "ตั้งค่าข้อมูลหลัก" (ใช้กับลิงก์แจ้งเตือนคำขอสิทธิ์ใหม่ — ดู accessRequestsDeepLink) */
 (async function init(){
   await authenticate();
   render();
@@ -2289,6 +2295,7 @@ async function checkForUpdate(){
   const params = new URLSearchParams(location.search);
   const linkOrderId = params.get('order');
   const linkRole = params.get('role');
+  const linkView = params.get('view');
   if(linkRole && state.allowedRoles.includes(linkRole)){
     state.role = linkRole;
     if(linkRole === 'tech') state.myTechName = state.techIdentities[0] || '';
@@ -2300,6 +2307,10 @@ async function checkForUpdate(){
     const peeked = await getOrderById(linkOrderId);
     if(peeked){ state.orders = [peeked]; await openDetail(linkOrderId); }
     else render();
+  } else if(linkView === 'settings' && state.role === 'admin'){
+    history.replaceState(null, '', location.pathname);
+    state.view = 'settings';
+    render();
   } else {
     render();
   }
