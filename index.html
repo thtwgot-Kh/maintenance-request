@@ -2089,12 +2089,18 @@ function renderAdminBootstrap(){
 }
 function renderRequestAccess(){
   const u = state.ui;
-  const deptOpts = (state.config.departments || []).map(d =>
-    `<option value="${escapeHtml(d.code)}" ${u.reqDept === d.code ? 'selected' : ''}>${escapeHtml(d.code)} — ${escapeHtml(d.name)}</option>`).join('');
+  // ตอนนี้หน้านี้โชว์ได้ก่อน config (แผนก/ช่าง) จะโหลดเสร็จ (ดู authenticate()) — ระหว่างนั้น
+  // state.config ยังเป็นค่า default ที่ฝังในโค้ด (DEPT_DEFAULT/TECH_DEFAULT) ซึ่งเป็นแค่ placeholder
+  // ไม่ใช่ข้อมูลจริงจากชีต ถ้าเอามาโชว์เป็นตัวเลือกจะทำให้ผู้ใช้เข้าใจผิดว่าเป็นรายชื่อจริง (เคยเกิดขึ้นมาแล้ว
+  // — เห็นแค่ 4 แผนกชื่อภาษาอังกฤษ ทั้งที่ชีตจริงมี 9 แผนกชื่อภาษาไทย) จึงต้องรอ state.loaded ก่อนค่อยโชว์
+  // รายการจริง ระหว่างรอให้ปิดช่องเลือกไว้พร้อมข้อความ "กำลังโหลด..." แทน
+  const configReady = state.loaded;
+  const deptOpts = configReady ? (state.config.departments || []).map(d =>
+    `<option value="${escapeHtml(d.code)}" ${u.reqDept === d.code ? 'selected' : ''}>${escapeHtml(d.code)} — ${escapeHtml(d.name)}</option>`).join('') : '';
   const roleOpts = Object.keys(ROLES).filter(r => r !== 'admin').map(r =>
     `<option value="${r}" ${u.reqRole === r ? 'selected' : ''}>${ROLES[r].icon} ${ROLES[r].label}</option>`).join('');
-  const techOpts = (state.config.technicians || []).map(t =>
-    `<option value="${escapeHtml(t)}" ${u.reqTechName === t ? 'selected' : ''}>${escapeHtml(t)}</option>`).join('');
+  const techOpts = configReady ? (state.config.technicians || []).map(t =>
+    `<option value="${escapeHtml(t)}" ${u.reqTechName === t ? 'selected' : ''}>${escapeHtml(t)}</option>`).join('') : '';
   return renderAuthShell(`
     <h2 class="view-title">ขอสิทธิ์เข้าใช้งาน</h2>
     <p class="view-sub">กรอกข้อมูลเพื่อขอสิทธิ์ ผู้ดูแลระบบจะเป็นผู้อนุมัติและกำหนดบทบาทให้ท่าน</p>
@@ -2105,8 +2111,8 @@ function renderRequestAccess(){
       </div>
       <div class="field">
         <label class="field-label">แผนก</label>
-        <select class="input" onchange="state.ui.reqDept=this.value">
-          <option value="">— ไม่ระบุ —</option>
+        <select class="input" onchange="state.ui.reqDept=this.value" ${configReady ? '' : 'disabled'}>
+          <option value="">${configReady ? '— ไม่ระบุ —' : 'กำลังโหลดรายชื่อแผนก...'}</option>
           ${deptOpts}
         </select>
       </div>
@@ -2117,8 +2123,8 @@ function renderRequestAccess(){
       ${u.reqRole === 'tech' ? `
       <div class="field">
         <label class="field-label">ชื่อช่าง (เลือกชื่อของท่านจากรายชื่อช่าง) <span class="req-star">*</span></label>
-        <select class="input" onchange="state.ui.reqTechName=this.value">
-          <option value="">— กรุณาเลือก —</option>
+        <select class="input" onchange="state.ui.reqTechName=this.value" ${configReady ? '' : 'disabled'}>
+          <option value="">${configReady ? '— กรุณาเลือก —' : 'กำลังโหลดรายชื่อช่าง...'}</option>
           ${techOpts}
         </select>
         <p class="desc" style="font-size:12px; color:var(--slate); margin:6px 0 0;">ต้องเลือกให้ตรงกับชื่อตัวเอง ระบบใช้ชื่อนี้ตรวจว่างานไหนเป็นงานที่มอบหมายให้ท่าน</p>
