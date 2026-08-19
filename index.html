@@ -453,10 +453,10 @@ async function resolveAccess(){
 async function authenticate(){
   state.deviceId = getDeviceId();
   state.didHash = await sha256Hex(state.deviceId);
-  // หน้าขอสิทธิ์ต้องใช้รายชื่อแผนก/ช่าง และ URL แจ้งเตือน LINE ของ admin จึงต้องโหลด config ก่อนด้วย
-  const cfg = await storeGet('config');
-  if(cfg) state.config = Object.assign({}, state.config, cfg);
-  if(!state.config.lineWebhooks) state.config.lineWebhooks = {};
+  // ไม่รอโหลด config (ต้องอ่านชีตแผนก/เครื่องจักร/ช่างสด 3 ชีต ซึ่งช้าที่สุดในบรรดา doGet ทั้งหมด)
+  // ก่อนเช็คสิทธิ์ — resolveAccess() ไม่ได้ใช้ config เลย ปล่อยให้ loadEssential() โหลด config
+  // แยกไปเบื้องหลังทีหลัง (ฟอร์ม/หน้าจอที่ยังไม่มีสิทธิ์ใช้ค่า default ของ state.config ไปพลางก่อนได้)
+  // เพื่อให้ผู้ใช้เห็นหน้า "ขอสิทธิ์เข้าใช้งาน" ไวที่สุด แทนที่จะรอ 2 รอบเครือข่ายซ้อนกัน
   await resolveAccess();
 }
 /* ระหว่างรอผู้ดูแลอนุมัติ ให้เช็คสิทธิ์ซ้ำเป็นระยะ พออนุมัติแล้วจะเข้าระบบให้เองโดยผู้ใช้ไม่ต้องทำอะไร */
@@ -525,6 +525,9 @@ async function submitAccessRequest(){
   state.authStatus = 'pending';
   render();
   toast('ส่งคำขอเรียบร้อย รอผู้ดูแลอนุมัติ');
+  // ต้องรอ config (lineWebhooks) โหลดให้เสร็จก่อนแจ้งเตือน — ตอนนี้หน้าขอสิทธิ์โชว์ได้ก่อน config
+  // จะโหลดเสร็จ ถ้าผู้ใช้กดส่งไวมากอาจจะยังไม่มี URL webhook ให้ยิง ไม่งั้น admin จะไม่ได้รับแจ้งเตือนเงียบๆ
+  await ensureEssentialLoaded();
   await tryLineWebhook('admin',
     `🔐 มีคำขอสิทธิ์เข้าใช้งานใหม่\n` +
     `ชื่อ: ${name}\n` +
@@ -660,6 +663,13 @@ async function storeSet(key, val){
 /* โหลดเฉพาะข้อมูลที่จำเป็นต่อการใช้งานหน้าแรก (ฟอร์ม "ใบคำร้อง/ใบแจ้งซ่อม") ให้เร็วที่สุด — แผนก/
    เครื่องจักร/ช่างอยู่ใน config เท่านั้น ส่วน orders/notifications/counters (ก้อนใหญ่ โตขึ้นเรื่อยๆ
    ตามประวัติ) กับข้อมูลหน้าตั้งค่า (lineUsers ฯลฯ ใช้แค่ admin) เลื่อนไปโหลดทีหลังแยกต่างหาก */
+let essentialLoadPromise = null;
+// เรียก loadEssential() ครั้งเดียวไม่ว่าจะถูกเรียกจากกี่จุด — คืน promise เดิมถ้ากำลังโหลดอยู่แล้ว/โหลดเสร็จแล้ว
+// กันไม่ให้ยิง storeGet('config') ซ้ำซ้อน (เช่นตอน submitAccessRequest ต้องรอ lineWebhooks ให้พร้อมก่อนแจ้งเตือน)
+function ensureEssentialLoaded(){
+  if(!essentialLoadPromise) essentialLoadPromise = loadEssential();
+  return essentialLoadPromise;
+}
 async function loadEssential(){
   const cfg = await storeGet('config');
   state.config = cfg || state.config;
@@ -2252,13 +2262,13 @@ async function checkForUpdate(){
   if(state.authStatus !== 'ok'){
     // หน้า "ขอสิทธิ์เข้าใช้งาน" ใช้ config (แผนก/ชื่อช่าง) ในดรอปดาวน์ — โหลดเบื้องหลังไม่บล็อกฟอร์ม
     // (เดิมหน้านี้ไม่เคยโหลด config เลย เลยโชว์รายชื่อ default ที่ฝังไว้ในโค้ด ไม่ใช่ของจริงจากชีต)
-    loadEssential().then(render);
+    ensureEssentialLoaded().then(render);
     // ยังไม่มีสิทธิ์ — คอยเช็คให้เอง พอผู้ดูแลกดอนุมัติแล้วหน้านี้จะเข้าระบบทันทีโดยผู้ใช้ไม่ต้องกดอะไร
     setInterval(recheckAccess, 7000);
     document.addEventListener('visibilitychange', () => { if(!document.hidden) recheckAccess(); });
     return;
   }
-  await loadEssential();
+  await ensureEssentialLoaded();
   render();
 
   const params = new URLSearchParams(location.search);
