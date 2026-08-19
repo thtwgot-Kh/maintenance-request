@@ -322,6 +322,8 @@ let state = {
   orders: [],
   notifications: [],
   loaded: false,
+  ordersLoaded: false,   // true เมื่อ orders/notifications/counters โหลดรายการเต็มเสร็จแล้ว (ไม่ใช่แค่ใบเดียวที่ peek มา)
+  lineDataLoaded: false, // true เมื่อ lineUsers/lineUserRoles/lineRecipients โหลดแล้ว (เฉพาะตอน admin เข้าหน้าตั้งค่า)
   form: emptyForm(),
   showMachineDropdown: false,
   selectedOrderId: null,
@@ -362,6 +364,16 @@ async function getUserRoles(userId){
     const data = await res.json();
     return data.value ? JSON.parse(data.value) : { roles:[], techNames:[] };
   }catch(e){ return { roles:[], techNames:[] }; }
+}
+// ขอใบแจ้งซ่อมใบเดียวจากเซิร์ฟเวอร์ (กรองฝั่ง Apps Script) — ใช้ตอนเปิดแอปจากลิงก์แจ้งเตือน LINE
+// โดยตรง เพื่อโชว์หน้ารายละเอียดได้ไวโดยไม่ต้องรอโหลดรายการ orders ทั้งหมดก่อน
+async function getOrderById(id){
+  try{
+    const res = await fetch(API_URL + '?key=order&id=' + encodeURIComponent(id));
+    if(!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    return data.value ? JSON.parse(data.value) : null;
+  }catch(e){ console.error('getOrderById failed', id, e); return null; }
 }
 /* ============================= IDENTITY & ACCESS (ไม่ต้องล็อกอิน LINE) =============================
    ใครก็เปิดลิงก์แอปนี้จากเบราว์เซอร์อะไรก็ได้ แล้ว "ขอสิทธิ์" ในหน้าแรก → ผู้ดูแลระบบ (admin) กดอนุมัติ
@@ -625,19 +637,13 @@ async function storeSet(key, val){
   }catch(e){ console.error('storage set failed', key, e); return false; }
 }
 
-async function loadAll(){
-  const [cfg, counters, orders, notifs, lineUsers, lineUserRoles, lineRecipients] = await Promise.all([
-    storeGet('config'), storeGet('counters'), storeGet('orders'), storeGet('notifications'),
-    storeGet('lineUsers'), storeGet('lineUserRoles'), storeGet('lineRecipients')
-  ]);
+/* โหลดเฉพาะข้อมูลที่จำเป็นต่อการใช้งานหน้าแรก (ฟอร์ม "ใบคำร้อง/ใบแจ้งซ่อม") ให้เร็วที่สุด — แผนก/
+   เครื่องจักร/ช่างอยู่ใน config เท่านั้น ส่วน orders/notifications/counters (ก้อนใหญ่ โตขึ้นเรื่อยๆ
+   ตามประวัติ) กับข้อมูลหน้าตั้งค่า (lineUsers ฯลฯ ใช้แค่ admin) เลื่อนไปโหลดทีหลังแยกต่างหาก */
+async function loadEssential(){
+  const cfg = await storeGet('config');
   state.config = cfg || state.config;
   if(!state.config.lineWebhooks) state.config.lineWebhooks = {};
-  state.counters = counters || {};
-  state.orders = orders || [];
-  state.notifications = notifs || [];
-  state.lineUsers = Array.isArray(lineUsers) ? lineUsers : [];
-  state.lineUserRoles = (lineUserRoles && typeof lineUserRoles === 'object') ? lineUserRoles : {};
-  state.lineRecipients = Array.isArray(lineRecipients) ? lineRecipients : [];
   state.loaded = true;
   // เขียน config เริ่มต้นกลับไปเฉพาะตอนเซิร์ฟเวอร์ตอบว่า "ยังไม่มี config เลยจริงๆ" (cfg === null)
   // ห้ามเขียนทับตอนแค่ดึงข้อมูลไม่สำเร็จ (cfg === undefined เช่น deploy ใหม่ยังไม่พร้อม/เน็ตหลุด)
@@ -651,6 +657,33 @@ async function loadAll(){
       console.warn('ข้าม auto-seed config เริ่มต้น (ยังไม่ยืนยัน หรือไม่ใช่ admin)');
     }
   }
+}
+/* ก้อนข้อมูลใหญ่/โตเรื่อยๆ — โหลดคู่ขนานไปเบื้องหลังหลังหน้าจอแรกโชว์แล้ว ไม่บล็อกผู้ใช้
+   (ปุ่มที่ต้องเขียนกลับ orders ทุกปุ่มเช็ค state.ordersLoaded ก่อนเสมอ ดู persistOrders()) */
+async function loadBackground(){
+  const [counters, orders, notifs] = await Promise.all([
+    storeGet('counters'), storeGet('orders'), storeGet('notifications')
+  ]);
+  state.counters = counters || {};
+  // ถ้าเปิดจากลิงก์แจ้งเตือนมาก่อน state.orders อาจมีใบที่ peek มาใบเดียวอยู่แล้ว — รายการเต็มที่โหลด
+  // มาตอนนี้ถูกต้องกว่าเสมอ แทนที่ตรงๆ ได้เลย
+  state.orders = orders || [];
+  state.notifications = notifs || [];
+  state.ordersLoaded = true;
+  render();
+}
+/* ข้อมูลเฉพาะหน้า "ตั้งค่าข้อมูลหลัก" ของ admin — คนอื่นไม่เคยต้องใช้เลย จึงโหลดแบบขี้เกียจ (lazy)
+   แค่ตอน admin เข้าหน้านี้จริงๆ (เรียกจาก setView) ไม่ต้องรวมอยู่ใน initial load ของทุกคน */
+async function ensureLineDataLoaded(){
+  if(state.lineDataLoaded) return;
+  const [lineUsers, lineUserRoles, lineRecipients] = await Promise.all([
+    storeGet('lineUsers'), storeGet('lineUserRoles'), storeGet('lineRecipients')
+  ]);
+  state.lineUsers = Array.isArray(lineUsers) ? lineUsers : [];
+  state.lineUserRoles = (lineUserRoles && typeof lineUserRoles === 'object') ? lineUserRoles : {};
+  state.lineRecipients = Array.isArray(lineRecipients) ? lineRecipients : [];
+  state.lineDataLoaded = true;
+  render();
 }
 
 /* ============================= UTIL ============================= */
@@ -793,6 +826,7 @@ function removePhoto(idx){
 
 async function submitOrder(){
   const f = state.form;
+  if(!state.ordersLoaded){ toast('กำลังโหลดข้อมูลระบบ กรุณารอสักครู่แล้วลองใหม่', true); return; }
   if(!f.dept){ toast('กรุณาเลือกแผนก', true); return; }
   if(!f.docType){ toast('กรุณาเลือกประเภทเอกสาร', true); return; }
   if(!f.machineCode){ toast('กรุณาเลือกรหัสเครื่องจักร', true); return; }
@@ -873,7 +907,12 @@ async function openDetail(id){
 function backToList(){ state.view='list'; state.selectedOrderId=null; render(); }
 function getOrder(id){ return state.orders.find(o => o.id === id); }
 
-async function persistOrders(){ await storeSet('orders', state.orders); }
+// เผื่อ state.orders ยังเป็นแค่ใบเดียวที่ขอมาแบบด่วนตอนเปิดจากลิงก์แจ้งเตือน (ยังไม่ใช่รายการเต็ม) —
+// ห้ามเขียนทับ "orders" บนเซิร์ฟเวอร์ด้วยรายการที่ไม่ครบ ไม่งั้นใบอื่นๆ ที่ยังไม่ถูกโหลดมาจะหายไปหมด
+async function persistOrders(){
+  if(!state.ordersLoaded){ console.warn('persistOrders skipped — orders not fully loaded yet'); return false; }
+  return await storeSet('orders', state.orders);
+}
 
 function openActionBox(id, type){
   state.ui.actionFor = id; state.ui.actionType = type; state.ui.actionNote = ''; state.ui.resubmitPhotos = [];
@@ -1209,6 +1248,7 @@ function setRole(value){
 }
 function setView(v){
   if(v==='settings' && state.role!=='admin') return;
+  if(v==='settings') ensureLineDataLoaded(); // ไม่ await — โหลดเบื้องหลัง render() เองเมื่อเสร็จ
   state.view = v; render();
 }
 
@@ -1378,6 +1418,7 @@ function renderList(){
       ${Object.keys(STATUS_META).map(s=>`<option value="${s}" ${state.filterStatus===s?'selected':''}>${STATUS_META[s].label}</option>`).join('')}
     </select>
   </div>
+  ${!state.ordersLoaded ? `<p class="desc">⏳ กำลังโหลดรายการ...</p>` : ''}
   ${orders.length ? cards : `<div class="empty-state"><div class="big">🗒️</div>ยังไม่มีใบแจ้งซ่อมตามเงื่อนไขที่เลือก</div>`}
   `;
 }
@@ -1428,7 +1469,11 @@ function renderDetail(){
       </div>`;
   }
 
-  if(hasRole('fm') && o.status==='PENDING_FM'){
+  if(!state.ordersLoaded){
+    // เปิดจากลิงก์แจ้งเตือน LINE โดยตรง — โชว์ใบนี้ได้ไวจากข้อมูลที่ขอมาเฉพาะใบ แต่ปุ่มที่ต้องบันทึกกลับ
+    // ต้องรอให้รายการเต็มโหลดเสร็จก่อน กันไม่ให้บันทึกทับข้อมูลใบอื่นที่ยังไม่ถูกโหลดเข้ามาใน state.orders
+    actionBox = `<div class="action-box"><p class="desc" style="margin:0;">⏳ กำลังโหลดข้อมูลเพิ่มเติม กรุณารอสักครู่ก่อนกดปุ่มดำเนินการ...</p></div>`;
+  } else if(hasRole('fm') && o.status==='PENDING_FM'){
     actionBox = `
     <div class="action-box">
       <h4>รออนุมัติจากผู้จัดการโรงงาน</h4>
@@ -1654,6 +1699,7 @@ function renderNotif(){
   return `
   <h2 class="view-title">การแจ้งเตือน — ${ROLES[state.role].label}</h2>
   <p class="view-sub">${state.role==='admin' ? 'การแจ้งเตือนในระบบของทุกบทบาทรวมกัน' : 'การแจ้งเตือนในระบบสำหรับบทบาทนี้'} (พร้อมส่งต่อไปยัง LINE หากตั้งค่า Webhook ไว้ในหน้าตั้งค่า)</p>
+  ${!state.ordersLoaded ? `<p class="desc">⏳ กำลังโหลดรายการ...</p>` : ''}
   ${mine.length ? `<div style="margin-bottom:12px;"><button class="btn btn-outline btn-sm" onclick="markAllRead()">ทำเครื่องหมายว่าอ่านแล้วทั้งหมด</button></div>` : ''}
   ${mine.length ? items : `<div class="empty-state"><div class="big">📭</div>ยังไม่มีการแจ้งเตือนสำหรับบทบาทนี้</div>`}
   `;
@@ -1916,6 +1962,7 @@ function renderSettings(){
   return `
   <h2 class="view-title">ตั้งค่าข้อมูลหลัก</h2>
   <p class="view-sub">ข้อมูลหลักจัดการที่ Google Sheet ส่วนนี้ตั้งค่าเฉพาะของแอป</p>
+  ${!state.lineDataLoaded ? `<p class="desc">⏳ กำลังโหลดข้อมูลผู้ใช้ LINE...</p>` : ''}
 
   ${renderAccessRequests()}
 
@@ -2124,9 +2171,14 @@ function render(){
 /* ============================= LIVE POLLING (near real-time sync) ============================= */
 async function pollForUpdates(){
   try{
-    const [cfg, orders, notifs, reqs, lineUsers, lineUserRoles, lineRecipients] = await Promise.all([
+    // lineUsers/lineUserRoles/lineRecipients ใช้แค่หน้าตั้งค่าของ admin — โหลด/poll แค่ตอนเคยเข้าหน้านั้น
+    // แล้วเท่านั้น (state.lineDataLoaded) คนอื่นๆ ไม่ต้องยิง 3 คำขอนี้ทุก 3 วิให้เสียเวลาเปล่า
+    const lineDataPromise = state.lineDataLoaded
+      ? Promise.all([storeGet('lineUsers'), storeGet('lineUserRoles'), storeGet('lineRecipients')])
+      : Promise.resolve([null, null, null]);
+    const [cfg, orders, notifs, reqs, [lineUsers, lineUserRoles, lineRecipients]] = await Promise.all([
       storeGet('config'), storeGet('orders'), storeGet('notifications'), storeGet('accessRequests'),
-      storeGet('lineUsers'), storeGet('lineUserRoles'), storeGet('lineRecipients')
+      lineDataPromise
     ]);
     let changed = false;
     if(lineUsers && JSON.stringify(lineUsers) !== JSON.stringify(state.lineUsers)){ state.lineUsers = lineUsers; changed = true; }
@@ -2135,6 +2187,9 @@ async function pollForUpdates(){
     if(cfg && JSON.stringify(cfg) !== JSON.stringify(state.config)){ state.config = cfg; changed = true; }
     if(orders && JSON.stringify(orders) !== JSON.stringify(state.orders)){ state.orders = orders; changed = true; }
     if(notifs && JSON.stringify(notifs) !== JSON.stringify(state.notifications)){ state.notifications = notifs; changed = true; }
+    // กันเหนียว: ถ้า loadBackground() พลาดไปด้วยเหตุผลใดก็ตาม รอบ poll ถัดไปที่ได้ orders มาจริง
+    // จะปลดล็อกปุ่มบันทึกต่างๆ ให้เองแทน ไม่ต้องรอ refresh หน้า
+    if(orders && !state.ordersLoaded) state.ordersLoaded = true;
     // คำขอสิทธิ์: ให้ admin เห็นคำขอใหม่สดๆ และถ้าสิทธิ์ของตัวเองถูกแก้/ถอนระหว่างใช้งานก็ปรับตามทันที
     if(reqs && JSON.stringify(reqs) !== JSON.stringify(state.accessRequests)){
       const grantSig = r => r ? `${r.status}|${(r.roles || []).join(',')}|${r.techName || ''}` : '';
@@ -2179,7 +2234,8 @@ async function checkForUpdate(){
     document.addEventListener('visibilitychange', () => { if(!document.hidden) recheckAccess(); });
     return;
   }
-  await loadAll();
+  await loadEssential();
+  render();
 
   const params = new URLSearchParams(location.search);
   const linkOrderId = params.get('order');
@@ -2188,12 +2244,17 @@ async function checkForUpdate(){
     state.role = linkRole;
     if(linkRole === 'tech') state.myTechName = state.techIdentities[0] || '';
   }
-  if(linkOrderId && getOrder(linkOrderId)){
+  if(linkOrderId){
     history.replaceState(null, '', location.pathname);
-    await openDetail(linkOrderId);
+    // ลัดคิว: ขอใบนี้ใบเดียวจากเซิร์ฟเวอร์ก่อน ให้เห็นหน้ารายละเอียดไวๆ ระหว่างที่รายการเต็มโหลดเบื้องหลัง
+    // อยู่ (ปุ่มที่ต้องบันทึกจะถูกซ่อนไว้จนกว่า loadBackground() จะเสร็จ ดู renderDetail())
+    const peeked = await getOrderById(linkOrderId);
+    if(peeked){ state.orders = [peeked]; await openDetail(linkOrderId); }
+    else render();
   } else {
     render();
   }
+  loadBackground(); // ไม่ await — โหลดเบื้องหลัง ไม่บล็อกหน้าจอ
   setInterval(pollForUpdates, 3000);
   setInterval(checkForUpdate, 120000);
   // รีเฟรชทันทีเมื่อผู้ใช้กลับมาที่แท็บนี้ (สลับแท็บ/แอปแล้วกลับมา) แทนที่จะรอรอบ poll ถัดไป
