@@ -361,9 +361,12 @@ async function storeGet(key){
 async function getUserRoles(userId){
   try{
     const res = await fetch(API_URL + '?key=userRoles&userId=' + encodeURIComponent(userId));
+    if(!res.ok) throw new Error('HTTP ' + res.status);
     const data = await res.json();
     return data.value ? JSON.parse(data.value) : { roles:[], techNames:[] };
-  }catch(e){ return { roles:[], techNames:[] }; }
+  // คืน null (ไม่ใช่ { roles:[] }) ตอนเน็ต/เซิร์ฟเวอร์มีปัญหา เพื่อให้ resolveAccess() แยกออกจากกรณี
+  // "เช็คสำเร็จแต่ไม่มีสิทธิ์จริงๆ" ได้ — ไม่งั้นคนที่มีสิทธิ์อยู่แล้วจะโดนเด้งกลับไปหน้าขอสิทธิ์ทุกครั้งที่โหลดพลาด
+  }catch(e){ console.error('getUserRoles failed', e); return null; }
 }
 // ขอใบแจ้งซ่อมใบเดียวจากเซิร์ฟเวอร์ (กรองฝั่ง Apps Script) — ใช้ตอนเปิดแอปจากลิงก์แจ้งเตือน LINE
 // โดยตรง เพื่อโชว์หน้ารายละเอียดได้ไวโดยไม่ต้องรอโหลดรายการ orders ทั้งหมดก่อน
@@ -421,12 +424,18 @@ async function resolveAccess(){
     getUserRoles(state.deviceId),
     storeGet('accessRequests'),
   ]);
+  // sheet===null (getUserRoles ล้มเหลว) หรือ requests===undefined (storeGet ล้มเหลว) แปลว่าเช็คไม่สำเร็จ
+  // ไม่ใช่ "ไม่มีสิทธิ์จริงๆ" — ถ้าตอนนี้เข้าใช้งานอยู่แล้ว (authStatus==='ok') ห้ามล้างสิทธิ์ทิ้งเด็ดขาด
+  // คงสถานะเดิมไว้ก่อน ไม่งั้นแค่โหลดพลาดครั้งเดียว (เน็ตกระตุก/Apps Script ช้า) จะเด้งคนที่มีสิทธิ์อยู่แล้ว
+  // กลับไปหน้า "ขอสิทธิ์เข้าใช้งาน" ทั้งที่ยังมีสิทธิ์ปกติ — บั๊กนี้เคยเจอเป็นครั้งคราว
+  if((sheet === null || requests === undefined) && state.authStatus === 'ok') return;
+
   state.accessRequests = Array.isArray(requests) ? requests : [];
   const mine = requestFor(state.didHash, state.accessRequests);
   state.myRequest = mine;
 
-  const roles = [...(sheet.roles || [])];
-  const techNames = [...(sheet.techNames || (sheet.techName ? [sheet.techName] : []))];
+  const roles = [...((sheet && sheet.roles) || [])];
+  const techNames = [...((sheet && (sheet.techNames || (sheet.techName ? [sheet.techName] : []))) || [])];
   if(mine && mine.status === 'approved'){
     (mine.roles || []).forEach(r => roles.push(r));
     if(mine.techName) techNames.push(mine.techName);
