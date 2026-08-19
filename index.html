@@ -477,6 +477,25 @@ async function saveAccessRequests(mutate){
   if(ok) state.accessRequests = next;
   return ok;
 }
+// เดารุ่นเบราว์เซอร์/อุปกรณ์แบบคร่าวๆ จาก user agent — แค่ไว้ให้ admin แยกแถวที่ชื่อซ้ำกัน
+// (เช่น คนเดียวกันขอผ่านมือถือ 1 ครั้ง คอม 1 ครั้ง) ไม่ใช่ตัวระบุตัวตนที่แม่นยำ และไม่กระทบความ
+// ปลอดภัยของ didHash เลย เพราะ user agent เป็นข้อมูลสาธารณะที่เบราว์เซอร์ส่งให้ทุกเว็บอยู่แล้ว
+function deviceLabel(){
+  const ua = navigator.userAgent || '';
+  let os = '';
+  if(/iPhone|iPad|iPod/.test(ua)) os = 'iPhone/iPad';
+  else if(/Android/.test(ua)) os = 'Android';
+  else if(/Windows/.test(ua)) os = 'Windows';
+  else if(/Macintosh/.test(ua)) os = 'Mac';
+  else if(/Linux/.test(ua)) os = 'Linux';
+  let browser = '';
+  if(/Line\//.test(ua)) browser = 'LINE in-app';
+  else if(/EdgiOS|Edg\//.test(ua)) browser = 'Edge';
+  else if(/CriOS|Chrome\//.test(ua)) browser = 'Chrome';
+  else if(/FxiOS|Firefox\//.test(ua)) browser = 'Firefox';
+  else if(/Safari\//.test(ua) && !/Chrome/.test(ua)) browser = 'Safari';
+  return [browser, os].filter(Boolean).join(' · ') || 'ไม่ทราบอุปกรณ์';
+}
 async function submitAccessRequest(){
   const u = state.ui;
   const name = (u.reqName || '').trim();
@@ -486,6 +505,7 @@ async function submitAccessRequest(){
   if(!state.didHash){ toast('เบราว์เซอร์นี้ไม่รองรับการขอสิทธิ์ กรุณาใช้เบราว์เซอร์อื่น', true); return; }
   const entry = {
     id: uid(), didHash: state.didHash, name,
+    device: deviceLabel(),
     dept: u.reqDept || '',
     requestedRole: u.reqRole,
     requestedTechName: u.reqRole === 'tech' ? u.reqTechName : '',
@@ -1758,6 +1778,7 @@ function renderAccessRequests(){
       <div style="font-size:13px; color:var(--slate); margin-top:3px;">
         แผนก: ${escapeHtml(r.dept || '-')} · ขอบทบาท: <b style="color:var(--ink);">${ROLES[r.requestedRole] ? escapeHtml(ROLES[r.requestedRole].label) : escapeHtml(r.requestedRole || '-')}</b>
         ${r.requestedTechName ? ` · ระบุชื่อช่าง: ${escapeHtml(r.requestedTechName)}` : ''}
+        ${r.device ? ` · อุปกรณ์: ${escapeHtml(r.device)}` : ''}
       </div>
       ${r.note ? `<div style="font-size:13px; margin-top:4px;">หมายเหตุ: ${escapeHtml(r.note)}</div>` : ''}
       <div style="margin-top:10px;">
@@ -1820,7 +1841,7 @@ function renderAccessRequests(){
       </td></tr>`;
     }
     return `<tr>
-      <td>${escapeHtml(r.name)}${r.techName ? `<div style="font-size:11.5px; color:var(--slate);">${escapeHtml(r.techName)}</div>` : ''}</td>
+      <td>${escapeHtml(r.name)}${r.techName ? `<div style="font-size:11.5px; color:var(--slate);">${escapeHtml(r.techName)}</div>` : ''}${r.device ? `<div style="font-size:11px; color:var(--slate-light);">${escapeHtml(r.device)}</div>` : ''}</td>
       <td>${escapeHtml(r.dept || '-')}</td>
       <td>${pill}${granted ? ` <span style="font-size:12px;">${escapeHtml(granted)}</span>` : ''}</td>
       <td>
